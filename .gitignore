@@ -1,0 +1,16 @@
+# Gradle and IDE
+.gradle/
+build/
+app/build/
+local.properties
+*.iml
+.idea/
+
+# The kernel binary and the geo data are downloaded, not committed: 44 MB per commit would
+# bury every real change. scripts/fetch-core.sh puts them in place.
+app/src/main/jniLibs/
+app/src/main/assets/*.dat
+
+# Signing material never lives in a repository
+*.jks
+*.keystore

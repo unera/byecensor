@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Две встречные стрелки: проверка через прокси -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp" android:height="24dp"
+    android:viewportWidth="24" android:viewportHeight="24"
+    android:tint="#d0d0d0">
+    <path android:fillColor="#ffffff"
+        android:pathData="M4,7h12l-3,-3 1.4,-1.4L20,8l-5.6,5.4L13,12l3,-3H4zM20,17H8l3,3 -1.4,1.4L4,16l5.6,-5.4L11,12l-3,3h12z" />
+</vector>

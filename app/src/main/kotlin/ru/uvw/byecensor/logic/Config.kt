@@ -1,0 +1,117 @@
+package ru.uvw.byecensor.logic
+
+import org.json.JSONArray
+import org.json.JSONObject
+
+/**
+ * The xray config, built from one server and the local settings.
+ *
+ * Two decisions live here and nowhere else:
+ *
+ * 1. the inbound is a SOCKS proxy with a username and a password. That is the whole point of
+ *    this app: a local proxy an app can be pointed at, not a VPN that takes over the device —
+ *    so no VpnService, no "turn off your VPN" screens, and no tun device;
+ * 2. routing is a mode, not a script: "everything through the proxy", "Russian addresses
+ *    direct" and "direct by default" cover what people actually do. Anything more is a
+ *    config editor, and this app is not one.
+ */
+object Config {
+    /** Where the app listens: loopback only, because nobody else should reach it. */
+    const val LISTEN = "127.0.0.1"
+
+    /**
+     * The kernel's config.
+     *
+     * The local SOCKS is always there: that is what makes this app usable — an app is pointed at
+     * `127.0.0.1` once and never touched again. The switch only decides whether that traffic goes
+     * to a server or straight out, and the domain list decides what goes straight out either way.
+     *
+     * @param server - the chosen upstream; null with [viaServer] true is a mistake, not a state.
+     * @param port - the local SOCKS port.
+     * @param user - the SOCKS username; required, because an open local proxy is a gift to
+     *   anything else on the phone.
+     * @param password - the SOCKS password, same reason.
+     * @param directDomains - domains that must not go through the server (`ru` covers a country).
+     * @param viaServer - false means everything goes direct, which is a proxy that is up and unused.
+     * @returns the JSON the kernel reads.
+     */
+    fun build(
+        server: Server?,
+        port: Int,
+        user: String,
+        password: String,
+        directDomains: List<String> = emptyList(),
+        proxyDomains: List<String> = emptyList(),
+        viaServer: Boolean = true,
+        httpPort: Int = 0,
+    ): JSONObject {
+        require(port in 1024..65535) { "порт должен быть от 1024 до 65535" }
+        require(user.isNotBlank()) { "нужен логин SOCKS: без него к прокси подключится кто угодно" }
+        require(password.isNotBlank()) { "нужен пароль SOCKS: без него к прокси подключится кто угодно" }
+        if (viaServer && server == null) {
+            throw IllegalArgumentException("нужен сервер: без него прокси некуда идти")
+        }
+
+        val inbound = JSONObject()
+            .put("tag", "socks-in")
+            .put("listen", LISTEN)
+            .put("port", port)
+            .put("protocol", "socks")
+            .put("settings", JSONObject()
+                .put("auth", "password")
+                .put("udp", true)
+                .put("accounts", JSONArray().put(JSONObject().put("user", user).put("pass", password))))
+
+        // a second door, for apps that speak HTTP proxy and not SOCKS — a browser, mostly.
+        // Same credentials, because a proxy without them is open to every app on the phone.
+        val inbounds = JSONArray().put(inbound)
+        if (httpPort > 0) {
+            inbounds.put(JSONObject()
+                .put("tag", "http-in")
+                .put("listen", LISTEN)
+                .put("port", httpPort)
+                .put("protocol", "http")
+                .put("settings", JSONObject()
+                    .put("auth", "password")
+                    .put("accounts", JSONArray().put(JSONObject().put("user", user).put("pass", password)))))
+        }
+
+        val outbounds = JSONArray()
+        if (server != null && viaServer) {
+            outbounds.put(server.outbound())
+        }
+        outbounds.put(JSONObject().put("tag", "direct").put("protocol", "freedom"))
+        outbounds.put(JSONObject().put("tag", "block").put("protocol", "blackhole"))
+
+        val rules = JSONArray()
+        if (!viaServer) {
+            // the proxy is up but carries nothing: every request leaves the phone as itself
+            rules.put(JSONObject().put("type", "field")
+                .put("network", "tcp,udp")
+                .put("outboundTag", "direct"))
+        } else {
+            // "always through the server" comes first: rules are read top to bottom, and a name on
+            // both lists means the person wanted it proxied, not spared
+            val through = proxyDomains.map { it.trim() }.filter { it.isNotBlank() }
+            if (through.isNotEmpty()) {
+                rules.put(JSONObject().put("type", "field")
+                    .put("domain", JSONArray(through))
+                    .put("outboundTag", "proxy"))
+            }
+            val direct = directDomains.map { it.trim() }.filter { it.isNotBlank() }
+            if (direct.isNotEmpty()) {
+                rules.put(JSONObject().put("type", "field")
+                    .put("domain", JSONArray(direct))
+                    .put("outboundTag", "direct"))
+            }
+        }
+
+        return JSONObject()
+            .put("log", JSONObject().put("loglevel", "warning"))
+            .put("inbounds", inbounds)
+            .put("outbounds", outbounds)
+            .put("routing", JSONObject().put("domainStrategy", "IPIfNonMatch").put("rules", rules))
+            .put("policy", JSONObject().put("levels", JSONObject()
+                .put("0", JSONObject().put("handshake", 4).put("connIdle", 300))))
+    }
+}
