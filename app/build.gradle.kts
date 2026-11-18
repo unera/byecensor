@@ -3,6 +3,13 @@ plugins {
     id("org.jetbrains.kotlin.android")
 }
 
+// Подпись — только из окружения: путь к ключу не должен жить в публичном репозитории.
+// Конфигурация создаётся лишь когда ключ есть, иначе любая задача (даже тесты) падала бы на
+// этапе настройки проекта — что и случилось в CI.
+val keystorePath: String = System.getenv("BYECENSOR_KEYSTORE").orEmpty()
+val keystorePass: String = System.getenv("BYECENSOR_KEYSTORE_PASS").orEmpty()
+val haveKey: Boolean = keystorePath.isNotBlank() && keystorePass.isNotBlank()
+
 android {
     namespace = "ru.uvw.byecensor"
     compileSdk = 34
@@ -11,35 +18,27 @@ android {
         applicationId = "ru.uvw.byecensor"
         minSdk = 33
         targetSdk = 34
-        versionCode = 32
-        versionName = "0.8.3"
+        versionCode = 33
+        versionName = "0.8.4"
         // только arm64: ядро Xray собрано под него, и держать в APK чужие архитектуры незачем
         ndk { abiFilters += listOf("arm64-v8a") }
     }
 
     signingConfigs {
-        create("release") {
-            // Подпись — только из окружения: путь к ключу не должен жить в публичном
-            // репозитории, а пустой пароль не должен молча превращаться в «подпись не удалась».
-            val store = System.getenv("BYECENSOR_KEYSTORE")
-            val pass = System.getenv("BYECENSOR_KEYSTORE_PASS")
-            if (store.isNullOrBlank() || pass.isNullOrBlank()) {
-                throw GradleException(
-                    "release signing needs BYECENSOR_KEYSTORE and BYECENSOR_KEYSTORE_PASS; " +
-                        "use assembleDebug to build without a key",
-                )
+        if (haveKey) {
+            create("release") {
+                storeFile = file(keystorePath)
+                storePassword = keystorePass
+                keyAlias = System.getenv("BYECENSOR_KEY_ALIAS") ?: "byecensor"
+                keyPassword = keystorePass
             }
-            storeFile = file(store)
-            storePassword = pass
-            keyAlias = System.getenv("BYECENSOR_KEY_ALIAS") ?: "byecensor"
-            keyPassword = pass
         }
     }
 
     buildTypes {
         release {
             isMinifyEnabled = false
-            signingConfig = signingConfigs.getByName("release")
+            if (haveKey) signingConfig = signingConfigs.getByName("release")
         }
     }
 
@@ -53,6 +52,19 @@ android {
     // каталога данных приложения, а из nativeLibraryDir — даёт
     packaging {
         jniLibs { useLegacyPackaging = true }
+    }
+}
+
+// Отдельный релиз без ключа был бы неподписанным APK, который никто не поставит: лучше
+// сказать это прямо, чем оставить человека с файлом, который «не устанавливается».
+tasks.matching { it.name == "assembleRelease" }.configureEach {
+    doFirst {
+        if (!haveKey) {
+            throw GradleException(
+                "для assembleRelease нужны BYECENSOR_KEYSTORE и BYECENSOR_KEYSTORE_PASS; " +
+                    "assembleDebug собирается без ключа",
+            )
+        }
     }
 }
 
