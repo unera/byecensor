@@ -23,8 +23,12 @@ jobs:
       # and does not depend on the action's own idea of what is installed.
       - name: Android SDK packages
         run: |
-          yes | sdkmanager --licenses > /dev/null 2>&1 || true
-          sdkmanager "platforms;android-34" "build-tools;34.0.0" > /dev/null
+          SDK="${ANDROID_SDK_ROOT:-$ANDROID_HOME}"
+          BIN="$SDK/cmdline-tools/latest/bin/sdkmanager"
+          [ -x "$BIN" ] || BIN="$(ls -d "$SDK"/cmdline-tools/*/bin/sdkmanager | head -1)"
+          echo "sdkmanager: $BIN"
+          yes | "$BIN" --licenses > /dev/null 2>&1 || true
+          "$BIN" "platforms;android-34" "build-tools;34.0.0" > /dev/null
 
       - name: Fetch the Xray kernel
         run: ./scripts/fetch-core.sh
