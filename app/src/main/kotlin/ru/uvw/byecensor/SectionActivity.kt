@@ -18,6 +18,7 @@ import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import ru.uvw.byecensor.logic.Config
 import ru.uvw.byecensor.logic.Probe
+import ru.uvw.byecensor.logic.Server
 import ru.uvw.byecensor.store.Store
 
 /**
@@ -279,10 +280,7 @@ class SectionActivity : AppCompatActivity() {
             val card = Ui.card(this)
             card.addView(Ui.title(this, (if (server.id == selected?.id) "● " else "○ ") + server.title()))
             card.addView(Ui.line(this, "${server.protocol.uppercase()} / ${server.transport.uppercase()} · ${server.host}:${server.port}"))
-            card.setOnClickListener {
-                store.select(server)
-                recreate()
-            }
+            card.setOnClickListener { actions(server) }
             card.setOnLongClickListener {
                 androidx.appcompat.app.AlertDialog.Builder(this@SectionActivity)
                     .setTitle("Удалить конфигурацию?")
@@ -297,9 +295,51 @@ class SectionActivity : AppCompatActivity() {
             }
             root.addView(card)
         }
-        root.addView(Ui.line(this, "нажатие — выбрать, долгое — забыть").apply {
+        root.addView(Ui.line(this, "нажатие — действия, долгое — забыть").apply {
             setPadding(dp(28), dp(10), dp(28), 0)
         })
+    }
+
+    /**
+     * What can be done with one saved server.
+     *
+     * A tap used to mean only "choose this one", so a link that turned out wrong had no door into
+     * an edit: the row looked tappable, did nothing visible when it was already the chosen one,
+     * and the only way out was to forget it and paste again.
+     */
+    private fun actions(server: Server) {
+        val active = store.selected()?.id == server.id
+        val labels = buildList {
+            if (!active) add("Сделать активным")
+            add("Изменить ссылку")
+            add("Забыть")
+        }
+        AlertDialog.Builder(this)
+            .setTitle(server.title())
+            .setItems(labels.toTypedArray()) { _, index ->
+                when (labels[index]) {
+                    "Сделать активным" -> {
+                        store.select(server)
+                        recreate()
+                    }
+                    "Изменить ссылку" -> LinkEditor.show(this, store, server) { recreate() }
+                    else -> forget(server)
+                }
+            }
+            .show()
+    }
+
+    /** Deleting a configuration is not undoable, so it asks first, with its name. */
+    private fun forget(server: Server) {
+        AlertDialog.Builder(this)
+            .setTitle("Удалить конфигурацию?")
+            .setMessage("Вы уверены, что хотите удалить «${server.title()}»?")
+            .setNegativeButton(android.R.string.cancel, null)
+            .setPositiveButton("Удалить") { _, _ ->
+                store.forget(server)
+                recreate()
+            }
+            .show()
     }
 
     /**

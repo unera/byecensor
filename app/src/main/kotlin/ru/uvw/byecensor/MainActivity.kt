@@ -463,70 +463,21 @@ class MainActivity : AppCompatActivity() {
         dialog.show()
     }
 
-    /**
-     * Edit the share link of a saved server in place.
-     *
-     * The link is the only form in which every field is visible at once, and the only one a person
-     * can correct by hand: `fp=chrome` → `fp=firefox` should cost one edit, not a delete and a
-     * fresh paste. The text goes through the same [Server.parse] the paste path uses, so a link
-     * the app cannot dial is refused here instead of becoming a broken configuration.
-     */
+    /** The share link of a saved server, editable in place: see [LinkEditor]. */
     private fun editLink(server: Server) {
-        val input = EditText(this).apply {
-            setText(server.link())
-            setTextColor(Color.parseColor("#dce6ff"))
-            setHintTextColor(Color.parseColor("#6b7280"))
-            setHint("vless://…")
-            textSize = 13f
-            setTypeface(Typeface.MONOSPACE)
-            setBackgroundColor(Color.parseColor("#111111"))
-            setPadding(dp(12), dp(12), dp(12), dp(12))
-            minLines = 4
-            maxLines = 14
-            gravity = Gravity.TOP or Gravity.START
-            setTextIsSelectable(true)
-            inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_MULTI_LINE
-        }
-        val holder = FrameLayout(this).apply {
-            setPadding(dp(16), dp(8), dp(16), 0)
-            addView(
-                input,
-                FrameLayout.LayoutParams(
-                    LinearLayout.LayoutParams.MATCH_PARENT,
-                    LinearLayout.LayoutParams.WRAP_CONTENT,
-                ),
-            )
-        }
-        val dialog = AlertDialog.Builder(this)
-            .setTitle("ссылка конфигурации")
-            .setView(holder)
-            .setNegativeButton(android.R.string.cancel, null)
-            .setPositiveButton("Сохранить", null)
-            .create()
-        // the positive button is overridden: a bad link keeps the dialog open with the text in it
-        dialog.setOnShowListener {
-            dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
-                val raw = input.text.toString()
-                val parsed = Server.parse(raw)
-                when {
-                    raw.isBlank() -> input.error = "ссылка пустая"
-                    parsed == null ->
-                        input.error = "не ссылка: нужна vless://, vmess://, trojan:// или ss://"
-                    else -> {
-                        val wasActive = store.selected()?.id == server.id
-                        store.replace(server, parsed)
-                        result.text = "ссылка сохранена: ${parsed.title()}"
-                        result.setTextColor(Color.parseColor("#7bd88f"))
-                        if (wasActive && ProxyService.State.running) {
-                            runCatching { ProxyService.reload(this) }
-                        }
-                        dialog.dismiss()
-                        refresh()
-                    }
+        LinkEditor.show(
+            context = this,
+            store = store,
+            server = server,
+            onSaved = { saved ->
+                result.text = "ссылка сохранена: ${saved.title()}"
+                result.setTextColor(Color.parseColor("#7bd88f"))
+                if (ProxyService.State.running && store.selected()?.id == saved.id) {
+                    runCatching { ProxyService.reload(this) }
                 }
-            }
-        }
-        dialog.show()
+                refresh()
+            },
+        )
     }
 
     /** The wait before a verdict: white, because it is neither good news nor bad yet. */
