@@ -38,7 +38,7 @@ class ProxyTileService : TileService() {
             this,
             if (viaServer) R.drawable.ic_stat_proxy else R.drawable.ic_stat_direct,
         )
-        tile.label = "Bye, Censor"
+        tile.label = "Bye, Censor!"
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
             tile.subtitle = when {
                 !viaServer -> "напрямую"

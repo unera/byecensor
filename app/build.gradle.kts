@@ -10,6 +10,14 @@ val keystorePath: String = System.getenv("BYECENSOR_KEYSTORE").orEmpty()
 val keystorePass: String = System.getenv("BYECENSOR_KEYSTORE_PASS").orEmpty()
 val haveKey: Boolean = keystorePath.isNotBlank() && keystorePass.isNotBlank()
 
+// Ядро в репозитории не лежит (его скачивает scripts/fetch-core.sh), и сборка без него
+// проходила молча: APK получался вдвое легче, а приложение падало с «нет ядра libxray.so».
+// Пусть лучше падает сборка — с внятным текстом.
+val kernel = file("src/main/jniLibs/arm64-v8a/libxray.so")
+require(kernel.exists()) {
+    "нет ядра: запустите scripts/fetch-core.sh (ожидается ${kernel.absolutePath})"
+}
+
 android {
     namespace = "ru.uvw.byecensor"
     compileSdk = 34
@@ -18,8 +26,8 @@ android {
         applicationId = "ru.uvw.byecensor"
         minSdk = 33
         targetSdk = 34
-        versionCode = 33
-        versionName = "0.8.4"
+        versionCode = 34
+        versionName = "0.8.5"
         // только arm64: ядро Xray собрано под него, и держать в APK чужие архитектуры незачем
         ndk { abiFilters += listOf("arm64-v8a") }
     }

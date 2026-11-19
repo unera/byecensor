@@ -1,4 +1,4 @@
-# Bye, Censor
+# Bye, Censor!
 
 A local SOCKS5 proxy for Android that runs an Xray kernel **without** `VpnService`.
 

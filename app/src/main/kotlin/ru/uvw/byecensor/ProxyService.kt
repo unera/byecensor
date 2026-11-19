@@ -201,7 +201,7 @@ class ProxyService : Service() {
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
         )
         return Notification.Builder(this, CHANNEL)
-            .setContentTitle("Bye, Censor")
+            .setContentTitle("Bye, Censor!")
             .setContentText(text)
             // the status bar carries the difference the launcher dot cannot: a shield when the
             // traffic goes through the server, an arrow when it goes out as is
