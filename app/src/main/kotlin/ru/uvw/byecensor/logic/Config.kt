@@ -44,6 +44,7 @@ object Config {
         proxyDomains: List<String> = emptyList(),
         viaServer: Boolean = true,
         httpPort: Int = 0,
+        httpNoAuth: Boolean = false,
     ): JSONObject {
         require(port in 1024..65535) { "порт должен быть от 1024 до 65535" }
         require(user.isNotBlank()) { "нужен логин SOCKS: без него к прокси подключится кто угодно" }
@@ -64,16 +65,25 @@ object Config {
 
         // a second door, for apps that speak HTTP proxy and not SOCKS — a browser, mostly.
         // Same credentials, because a proxy without them is open to every app on the phone.
+        //
+        // The exception is the system proxy: Android's Wi-Fi setting has no login fields, so the
+        // door has to be open for an app that reads the proxy from the system. It still listens on
+        // loopback only, so "open" means "open to this phone", not to the network.
         val inbounds = JSONArray().put(inbound)
         if (httpPort > 0) {
+            val httpSettings = if (httpNoAuth) {
+                JSONObject().put("auth", "noauth")
+            } else {
+                JSONObject()
+                    .put("auth", "password")
+                    .put("accounts", JSONArray().put(JSONObject().put("user", user).put("pass", password)))
+            }
             inbounds.put(JSONObject()
                 .put("tag", "http-in")
                 .put("listen", LISTEN)
                 .put("port", httpPort)
                 .put("protocol", "http")
-                .put("settings", JSONObject()
-                    .put("auth", "password")
-                    .put("accounts", JSONArray().put(JSONObject().put("user", user).put("pass", password)))))
+                .put("settings", httpSettings))
         }
 
         val outbounds = JSONArray()

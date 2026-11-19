@@ -141,6 +141,16 @@ class SectionActivity : AppCompatActivity() {
                 saved()
             }
         })
+        root.addView(Ui.row(
+            this,
+            "HTTP-прокси без пароля",
+            if (store.httpNoAuth) "включено" else "выключено",
+            "нужно для системного прокси Wi-Fi: там негде вписать логин",
+        ) {
+            store.httpNoAuth = !store.httpNoAuth
+            saved()
+            recreate()
+        })
         root.addView(valueRow("Порт HTTP", store.httpPort.toString()) { value ->
             val port = value.toIntOrNull()
             if (port == null || (port != 0 && port !in 1024..65535)) {
@@ -152,7 +162,7 @@ class SectionActivity : AppCompatActivity() {
         })
         root.addView(Ui.line(this,
             "HTTP-прокси нужен браузерам: они не умеют SOCKS с паролем. 0 — выключено. " +
-                "Логин и пароль у него те же").apply {
+                "Логин и пароль у него те же, если не включён режим без пароля").apply {
             setPadding(dp(28), dp(2), dp(28), dp(6))
         })
         root.addView(Ui.line(this, "Эти значения вводятся в приложении, которое будет ходить через прокси").apply {

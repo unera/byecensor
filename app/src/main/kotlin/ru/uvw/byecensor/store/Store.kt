@@ -167,6 +167,17 @@ class Store(context: Context) {
         set(value) = prefs.edit().putBoolean("via-server", value).apply()
 
     /**
+     * Whether the HTTP door asks for the password.
+     *
+     * Android's own proxy setting (Wi-Fi → Прокси) has no fields for a login, so an app that takes
+     * the proxy from the system can reach this door only without one. The door stays on loopback:
+     * any app on the phone may use it, nothing outside the phone can reach it at all.
+     */
+    var httpNoAuth: Boolean
+        get() = prefs.getBoolean("http-noauth", false)
+        set(value) = prefs.edit().putBoolean("http-noauth", value).apply()
+
+    /**
      * Domains that must not go through the server.
      *
      * A list rather than a preset: `ru` covers a country in one word, and a person who wants their

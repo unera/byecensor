@@ -71,6 +71,7 @@ class ProxyService : Service() {
         val config = Config.build(
             server, store.port, store.user, store.password,
             store.directDomains, store.proxyDomains, viaServer, store.httpPort,
+            store.httpNoAuth,
         )
         startKernel(config.toString())
     }
