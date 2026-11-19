@@ -47,6 +47,11 @@ jobs:
       - name: Build debug APK
         run: ./gradlew --no-daemon assembleDebug
 
+      # Собранный APK проверяем до того, как он станет артефактом: 0.8.4 уехала в релиз
+      # без ядра Xray, и заметили это только на телефоне.
+      - name: Проверить APK
+        run: ./scripts/check-apk.sh app/build/outputs/apk/debug/app-debug.apk
+
       - name: Upload the APK
         uses: actions/upload-artifact@v4
         with:

@@ -60,8 +60,18 @@ export BYECENSOR_KEY_ALIAS=byecensor      # optional, defaults to byecensor
 ./gradlew assembleRelease
 ```
 
-CI builds a debug APK and runs the unit tests on every push to `main` or `master` and on every
-pull request.
+Before anything is published, the built file is checked:
+
+```sh
+./scripts/check-apk.sh app/build/outputs/apk/release/app-release.apk
+```
+
+It fails when the APK has no `lib/arm64-v8a/libxray.so`, no `geoip.dat`/`geosite.dat`, is suspiciously
+small or is unsigned. This exists because 0.8.4 was released built without `fetch-core.sh`: the APK was
+6.3 MB instead of 22, and the app answered "no kernel" on the phone.
+
+CI builds a debug APK, runs the unit tests and runs the same check on every push to `main` or `master`
+and on every pull request.
 
 ## Tests
 
