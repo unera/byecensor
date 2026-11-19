@@ -3,6 +3,7 @@ package ru.uvw.byecensor.logic
 import org.json.JSONArray
 import org.json.JSONObject
 import java.net.URLDecoder
+import java.net.URLEncoder
 import java.util.Base64
 
 /**
@@ -28,6 +29,14 @@ data class Server(
     val flow: String = "",
     /** ss cipher and vmess encryption. */
     val method: String = "",
+    /**
+     * The TLS fingerprint the client presents, as xray names it: firefox, chrome, safari…
+     *
+     * Kept as a field rather than a constant because it is the one thing a link may need to change
+     * after it was pasted: DPI learned to recognise the chrome hello next to vless, while the
+     * firefox one still slips through, and a saved server must be editable to say so.
+     */
+    val fingerprint: String = "",
 ) {
     /** The xray outbound for this server, exactly as the kernel wants it. */
     fun outbound(): JSONObject {
@@ -62,7 +71,8 @@ data class Server(
             stream.put("security", security)
             val tls = JSONObject()
             if (sni.isNotBlank()) tls.put("serverName", sni)
-            if (security == "reality") tls.put("fingerprint", "chrome")
+            // firefox unless the link says otherwise: see the note on [fingerprint]
+            tls.put("fingerprint", fingerprint.ifBlank { "firefox" })
             stream.put("tlsSettings", tls)
         }
         when (transport) {
@@ -82,6 +92,62 @@ data class Server(
 
     /** How the server is called on screen: the remark, or the address when there is none. */
     fun title(): String = name.ifBlank { "$host:$port" }
+
+    /**
+     * The server back as a share link, for the editor.
+     *
+     * Only the fields the app dials: what it cannot use it does not pretend to keep, so the link
+     * it writes is the link it would accept back. The tests check that round trip.
+     */
+    fun link(): String {
+        val remark = if (name.isBlank()) "" else "#" + URLEncoder.encode(name, "UTF-8")
+        return when (protocol) {
+            "vless" -> buildString {
+                append("vless://").append(secret).append('@').append(address()).append('?')
+                append("type=").append(transport)
+                append("&security=").append(security)
+                if (sni.isNotBlank()) append("&sni=").append(URLEncoder.encode(sni, "UTF-8"))
+                if (path.isNotBlank()) append("&path=").append(URLEncoder.encode(path, "UTF-8"))
+                if (hostHeader.isNotBlank()) {
+                    append("&host=").append(URLEncoder.encode(hostHeader, "UTF-8"))
+                }
+                if (flow.isNotBlank()) append("&flow=").append(flow)
+                if (fingerprint.isNotBlank()) append("&fp=").append(fingerprint)
+                append(remark)
+            }
+            "trojan" -> buildString {
+                append("trojan://").append(secret).append('@').append(address()).append('?')
+                append("security=").append(security)
+                if (sni.isNotBlank()) append("&sni=").append(URLEncoder.encode(sni, "UTF-8"))
+                if (path.isNotBlank()) append("&path=").append(URLEncoder.encode(path, "UTF-8"))
+                if (hostHeader.isNotBlank()) {
+                    append("&host=").append(URLEncoder.encode(hostHeader, "UTF-8"))
+                }
+                if (fingerprint.isNotBlank()) append("&fp=").append(fingerprint)
+                append(remark)
+            }
+            "vmess" -> {
+                val json = JSONObject()
+                    .put("v", "2").put("ps", name)
+                    .put("add", host).put("port", port)
+                    .put("id", secret).put("scy", method.ifBlank { "auto" })
+                    .put("net", transport)
+                    .put("tls", if (security == "tls") "tls" else "")
+                    .put("sni", sni).put("host", hostHeader).put("path", path)
+                if (fingerprint.isNotBlank()) json.put("fp", fingerprint)
+                "vmess://" + Base64.getEncoder().encodeToString(json.toString().toByteArray())
+            }
+            "shadowsocks" -> {
+                val credentials = Base64.getEncoder()
+                    .encodeToString("$method:$secret".toByteArray())
+                "ss://$credentials@${address()}$remark"
+            }
+            else -> ""
+        }
+    }
+
+    /** host:port, with brackets when the host is an IPv6 literal. */
+    private fun address(): String = if (host.contains(':')) "[$host]:$port" else "$host:$port"
 
     companion object {
         /** @returns the server, or null when the text is not a link we understand. */
@@ -119,6 +185,7 @@ data class Server(
                 path = params["path"] ?: "",
                 hostHeader = params["host"] ?: "",
                 flow = params["flow"] ?: "",
+                fingerprint = params["fp"] ?: "",
             )
         }
 
@@ -140,6 +207,7 @@ data class Server(
                 path = json.optString("path"),
                 hostHeader = json.optString("host"),
                 method = json.optString("scy", "auto"),
+                fingerprint = json.optString("fp"),
             )
         }
 
@@ -158,6 +226,7 @@ data class Server(
                 sni = params["sni"] ?: params["peer"] ?: "",
                 path = params["path"] ?: "",
                 hostHeader = params["host"] ?: "",
+                fingerprint = params["fp"] ?: "",
             )
         }
 

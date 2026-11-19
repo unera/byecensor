@@ -201,4 +201,36 @@ class ConfigTest {
             assertTrue("порт $port должен быть отвергнут", error is IllegalArgumentException)
         }
     }
+
+    @Test
+    fun `the fingerprint from the link reaches the kernel`() {
+        val link = "vless://id@example.com:443?type=tcp&security=tls&sni=example.com&fp=firefox#Узел"
+        val server = Server.parse(link)
+        assertNotNull(server)
+        assertEquals("firefox", server?.fingerprint)
+        val tls = server!!.outbound().getJSONObject("streamSettings")
+            .getJSONObject("tlsSettings")
+        assertEquals("firefox", tls.getString("fingerprint"))
+    }
+
+    @Test
+    fun `a link that names no fingerprint asks for firefox`() {
+        val link = "vless://id@example.com:443?type=tcp&security=tls&sni=example.com#Узел"
+        val tls = Server.parse(link)!!.outbound().getJSONObject("streamSettings")
+            .getJSONObject("tlsSettings")
+        assertEquals("firefox", tls.getString("fingerprint"))
+    }
+
+    @Test
+    fun `a server turns back into the link it came from`() {
+        val link = "vless://1234-abcd@example.com:443?type=ws&security=tls" +
+            "&sni=edge.example.com&path=%2Fws&host=edge.example.com" +
+            "&flow=xtls-rprx-vision&fp=firefox#Немецкий%20узел"
+        val first = Server.parse(link)
+        assertNotNull(first)
+        val second = Server.parse(first!!.link())
+        assertNotNull(second)
+        assertEquals(first, second)
+        assertEquals("firefox", second!!.fingerprint)
+    }
 }
