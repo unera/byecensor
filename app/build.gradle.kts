@@ -26,8 +26,8 @@ android {
         applicationId = "ru.uvw.byecensor"
         minSdk = 33
         targetSdk = 34
-        versionCode = 39
-        versionName = "0.9.0"
+        versionCode = 40
+        versionName = "0.9.1"
         // только arm64: ядро Xray собрано под него, и держать в APK чужие архитектуры незачем
         ndk { abiFilters += listOf("arm64-v8a") }
     }

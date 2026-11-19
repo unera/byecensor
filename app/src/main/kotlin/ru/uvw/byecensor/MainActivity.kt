@@ -178,6 +178,15 @@ class MainActivity : AppCompatActivity() {
                 topMargin = dp(18)
             }
         }
+        // версия — над кнопкой: в переписке чаще всего спрашивают именно её, а искать её
+        // в настройках ради одной строки — лишний путь
+        root.addView(TextView(this).apply {
+            text = "версия ${appVersion()}"
+            textSize = 12f
+            gravity = Gravity.CENTER
+            setTextColor(Color.parseColor("#6b7280"))
+            setPadding(0, dp(12), 0, 0)
+        })
         root.addView(button)
 
         pill = TextView(this).apply {
@@ -734,6 +743,12 @@ class MainActivity : AppCompatActivity() {
         clipboard.setPrimaryClip(ClipData.newPlainText(name, value))
         result.text = "скопировано: $name"
     }
+
+    /** The version the system knows: BuildConfig would need a build feature this app does not use. */
+    private fun appVersion(): String = runCatching {
+        @Suppress("DEPRECATION")
+        packageManager.getPackageInfo(packageName, 0).versionName
+    }.getOrNull() ?: "—"
 
     private fun dp(value: Int): Int = (value * resources.displayMetrics.density).toInt()
 }
