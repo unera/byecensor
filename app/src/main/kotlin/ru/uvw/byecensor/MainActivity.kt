@@ -5,13 +5,17 @@ import android.content.ClipboardManager
 import android.content.Context
 import android.content.Intent
 import android.graphics.Color
+import android.graphics.Typeface
 import android.graphics.PorterDuff
 import android.graphics.drawable.GradientDrawable
 import android.os.Bundle
+import android.text.InputType
 import android.os.Handler
 import android.os.Looper
 import android.view.Gravity
 import android.view.View
+import android.widget.EditText
+import android.widget.FrameLayout
 import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.ScrollView
@@ -377,6 +381,10 @@ class MainActivity : AppCompatActivity() {
     /**
      * Everything about one configuration, and the questions worth asking about it.
      *
+     * The actions are a list rather than dialog buttons: all three of the dialog's buttons were
+     * already taken, and editing the link is what people look for after a server was pasted — a
+     * link that turned out wrong should not have to be deleted and pasted again.
+     *
      * The proxy test belongs to the configuration the kernel is running. Offering it on another
      * one would test a different server and report the answer as if it were about this one — so
      * for an inactive row the second button makes it active instead, and says why.
@@ -389,43 +397,127 @@ class MainActivity : AppCompatActivity() {
             appendLine("транспорт: ${server.transport}, защита: ${server.security}")
             if (server.sni.isNotBlank()) appendLine("sni: ${server.sni}")
             if (server.path.isNotBlank()) appendLine("path: ${server.path}")
+            if (server.fingerprint.isNotBlank()) appendLine("отпечаток TLS: ${server.fingerprint}")
             latency[server.id]?.let { appendLine("задержка: $it мс") }
             if (!active) appendLine()
             if (!active) append("проверка прокси идёт через активный конфиг, а этот — не он")
         }.trim()
-        val builder = AlertDialog.Builder(this)
+
+        val actions = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        val dialog = AlertDialog.Builder(this)
             .setTitle(server.title())
             .setMessage(text)
-            .setPositiveButton("Проверить сервер") { _, _ ->
-                pending("проверяю uplink…")
-        setProbesBusy(true)
-                Thread {
-                    val answer = Probe.server(server)
-                    runOnUiThread {
-                        showResult(answer, uplinkSquare)
-                        answer.text.substringAfter("отвечает,").trim().substringBefore(" мс")
-                            .toIntOrNull()?.let { latency[server.id] = it; refreshConfigs() }
-                    }
-                }.apply { isDaemon = true }.start()
-            }
-            .setNegativeButton("Забыть") { _, _ -> confirmForget(server) }
+            .setView(actions)
+            .setNegativeButton("Закрыть", null)
+            .create()
+
+        fun action(label: String, run: () -> Unit) {
+            actions.addView(TextView(this).apply {
+                this.text = label
+                textSize = 16f
+                setTextColor(Color.parseColor("#4f8fe0"))
+                setPadding(dp(20), dp(14), dp(20), dp(14))
+                setOnClickListener { dialog.dismiss(); run() }
+            })
+        }
+
+        action("Изменить ссылку") { editLink(server) }
+        action("Проверить сервер") {
+            pending("проверяю uplink…")
+            setProbesBusy(true)
+            Thread {
+                val answer = Probe.server(server)
+                runOnUiThread {
+                    showResult(answer, uplinkSquare)
+                    answer.text.substringAfter("отвечает,").trim().substringBefore(" мс")
+                        .toIntOrNull()?.let { latency[server.id] = it; refreshConfigs() }
+                }
+            }.apply { isDaemon = true }.start()
+        }
         if (active && running) {
-            builder.setNeutralButton("Проверить прокси") { _, _ ->
+            action("Проверить прокси") {
                 pending("проверяю прокси…")
-        setProbesBusy(true)
+                setProbesBusy(true)
                 Thread {
                     val answer = Probe.socksHttps(store.port, store.user, store.password)
                     runOnUiThread { showResult(answer, proxySquare) }
                 }.apply { isDaemon = true }.start()
             }
         } else if (!active) {
-            builder.setNeutralButton("Сделать активным") { _, _ ->
+            action("Сделать активным") {
                 store.select(server)
                 if (running) runCatching { ProxyService.reload(this) }
                 refresh()
             }
         }
-        builder.show()
+        action("Забыть") { confirmForget(server) }
+        dialog.show()
+    }
+
+    /**
+     * Edit the share link of a saved server in place.
+     *
+     * The link is the only form in which every field is visible at once, and the only one a person
+     * can correct by hand: `fp=chrome` → `fp=firefox` should cost one edit, not a delete and a
+     * fresh paste. The text goes through the same [Server.parse] the paste path uses, so a link
+     * the app cannot dial is refused here instead of becoming a broken configuration.
+     */
+    private fun editLink(server: Server) {
+        val input = EditText(this).apply {
+            setText(server.link())
+            setTextColor(Color.parseColor("#dce6ff"))
+            setHintTextColor(Color.parseColor("#6b7280"))
+            setHint("vless://…")
+            textSize = 13f
+            setTypeface(Typeface.MONOSPACE)
+            setBackgroundColor(Color.parseColor("#111111"))
+            setPadding(dp(12), dp(12), dp(12), dp(12))
+            minLines = 4
+            maxLines = 14
+            gravity = Gravity.TOP or Gravity.START
+            setTextIsSelectable(true)
+            inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_MULTI_LINE
+        }
+        val holder = FrameLayout(this).apply {
+            setPadding(dp(16), dp(8), dp(16), 0)
+            addView(
+                input,
+                FrameLayout.LayoutParams(
+                    LinearLayout.LayoutParams.MATCH_PARENT,
+                    LinearLayout.LayoutParams.WRAP_CONTENT,
+                ),
+            )
+        }
+        val dialog = AlertDialog.Builder(this)
+            .setTitle("ссылка конфигурации")
+            .setView(holder)
+            .setNegativeButton(android.R.string.cancel, null)
+            .setPositiveButton("Сохранить", null)
+            .create()
+        // the positive button is overridden: a bad link keeps the dialog open with the text in it
+        dialog.setOnShowListener {
+            dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
+                val raw = input.text.toString()
+                val parsed = Server.parse(raw)
+                when {
+                    raw.isBlank() -> input.error = "ссылка пустая"
+                    parsed == null ->
+                        input.error = "не ссылка: нужна vless://, vmess://, trojan:// или ss://"
+                    else -> {
+                        val wasActive = store.selected()?.id == server.id
+                        store.replace(server, parsed)
+                        result.text = "ссылка сохранена: ${parsed.title()}"
+                        result.setTextColor(Color.parseColor("#7bd88f"))
+                        if (wasActive && ProxyService.State.running) {
+                            runCatching { ProxyService.reload(this) }
+                        }
+                        dialog.dismiss()
+                        refresh()
+                    }
+                }
+            }
+        }
+        dialog.show()
     }
 
     /** The wait before a verdict: white, because it is neither good news nor bad yet. */

@@ -35,6 +35,7 @@ class Store(context: Context) {
                     hostHeader = item.optString("hostHeader"),
                     flow = item.optString("flow"),
                     method = item.optString("method"),
+                    fingerprint = item.optString("fingerprint"),
                 )
             }
         }
@@ -54,7 +55,8 @@ class Store(context: Context) {
                     .put("path", server.path)
                     .put("hostHeader", server.hostHeader)
                     .put("flow", server.flow)
-                    .put("method", server.method))
+                    .put("method", server.method)
+                    .put("fingerprint", server.fingerprint))
             }
             prefs.edit().putString("servers", array.toString()).apply()
         }
@@ -85,6 +87,19 @@ class Store(context: Context) {
         }
         if (added > 0) this.servers = known
         return added
+    }
+
+    /**
+     * Put an edited server in place of the old one, keeping the selection on it.
+     *
+     * Editing the link may change the id (the id is derived from the remark and the secret), and a
+     * chosen server that silently stops being chosen because its link was fixed is a bad surprise.
+     */
+    fun replace(old: Server, edited: Server) {
+        servers = servers.map { if (it.id == old.id) edited else it }
+        if (prefs.getString("selected", null) == old.id) {
+            prefs.edit().putString("selected", edited.id).apply()
+        }
     }
 
     fun forget(server: Server) {
