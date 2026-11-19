@@ -47,7 +47,7 @@ class HelpActivity : AppCompatActivity() {
             })
         })
 
-        // первое, на что натыкаются: приложение настроено, Bye Censor не запущен, и в приложении
+        // первое, на что натыкаются: приложение настроено, Bye, Censor не запущен, и в приложении
         // «нет сети» — выглядит как поломка, а это просто выключенный прокси
         root.addView(LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
@@ -64,9 +64,9 @@ class HelpActivity : AppCompatActivity() {
                 setTypeface(typeface, android.graphics.Typeface.BOLD)
             })
             addView(TextView(this@HelpActivity).apply {
-                text = "Приложения, настроенные на этот прокси, без запущенного Bye Censor работать " +
+                text = "Приложения, настроенные на этот прокси, без запущенного Bye, Censor работать " +
                     "не будут: они стучатся в 127.0.0.1:1099, а слушать там некому.\n\n" +
-                    "Если приложение пишет «нет сети» — откройте Bye Censor. Прокси поднимается сам, " +
+                    "Если приложение пишет «нет сети» — откройте Bye, Censor. Прокси поднимается сам, " +
                     "как только приложение открыто."
                 textSize = 14f
                 setTextColor(Color.parseColor("#d8c9c7"))
@@ -96,7 +96,7 @@ class HelpActivity : AppCompatActivity() {
 
             Установка: меню → Дополнения → Proxy Toggle → Добавить. Потом откройте расширение,
             выберите SOCKS5, сервер 127.0.0.1, порт 1099, логин и пароль — из «Параметров
-            подключения» Bye Censor.
+            подключения» Bye, Censor.
 
             Ещё вариант — FoxyProxy Standard: тоже работает и тоже умеет пароль, но вёрстка у него
             десктопная и на телефоне неудобная.
