@@ -111,7 +111,9 @@ object Config {
                 .put("settings", JSONObject()
                     .put("address", "whatsapp.net")
                     .put("port", 443)
-                    .put("network", "tcp")
+                    // UDP as well: a call carries its audio over UDP when it can, and with a
+                    // TCP-only door it falls back to TCP and complains about the connection.
+                    .put("network", "tcp,udp")
                     .put("followRedirect", false)))
         }
 
