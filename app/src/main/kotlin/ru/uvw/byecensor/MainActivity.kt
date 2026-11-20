@@ -9,6 +9,8 @@ import android.graphics.Typeface
 import android.graphics.PorterDuff
 import android.graphics.drawable.GradientDrawable
 import android.os.Bundle
+import android.os.PowerManager
+import android.provider.Settings
 import android.text.InputType
 import android.os.Handler
 import android.os.Looper
@@ -106,6 +108,7 @@ class MainActivity : AppCompatActivity() {
 
     override fun onResume() {
         super.onResume()
+        askForBatteryFreedom()
         // прокси живёт всегда: приложение открыто — значит локальный порт уже слушает, и
         // приложениям не нужно ждать, пока человек нажмёт что-то
         if (!ProxyService.State.running) ProxyService.start(this)
@@ -126,6 +129,38 @@ class MainActivity : AppCompatActivity() {
     override fun onPause() {
         ticker.removeCallbacksAndMessages(null)
         super.onPause()
+    }
+
+
+    /**
+     * Ask once for the battery exemption.
+     *
+     * A foreground service is supposed to be enough, and in plain Android it is. Phones with
+     * their own battery rules freeze a sideloaded app the moment it leaves the screen, and then
+     * the proxy socket accepts connections that nobody serves — the app that points at it says
+     * "no network" while this screen still shows it running.
+     */
+    private fun askForBatteryFreedom() {
+        val power = getSystemService(PowerManager::class.java) ?: return
+        if (power.isIgnoringBatteryOptimizations(packageName)) return
+        if (store.askedBatteryFreedom) return
+        store.askedBatteryFreedom = true
+        AlertDialog.Builder(this)
+            .setTitle("Не давать системе усыплять прокси")
+            .setMessage(
+                "Пока прокси работает, телефон будет держать его процесс. Без этого экран " +
+                    "гаснет — и приложения видят «нет сети», хотя прокси запущен.",
+            )
+            .setPositiveButton("Разрешить") { _, _ ->
+                runCatching {
+                    startActivity(Intent(
+                        Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS,
+                        android.net.Uri.parse("package:$packageName"),
+                    ))
+                }
+            }
+            .setNegativeButton("Позже", null)
+            .show()
     }
 
     private fun build(root: LinearLayout) {
@@ -504,6 +539,27 @@ class MainActivity : AppCompatActivity() {
         if (text.startsWith("ошибка", ignoreCase = true)) text else "ошибка: $text"
 
     /** Show a probe's verdict: green when it worked, red when it did not, and on its own square. */
+
+    /** "чат 1097: 12 мс · медиа 1096: нет соединения" — only when the doors are switched on. */
+    private fun whatsappLines(): String {
+        val chat = store.waChatPort
+        val media = store.waMediaPort
+        if (chat <= 0 && media <= 0) return ""
+        val parts = mutableListOf<String>()
+        if (chat > 0) {
+            val answer = Probe.whatsappPort(chat, expectOwnCertificate = true)
+            parts += "WA чат $chat: " + if (answer.ok) answer.text else withPrefix(answer.text)
+        }
+        if (media > 0) {
+            val answer = Probe.whatsappPort(media, expectOwnCertificate = false)
+            parts += "WA медиа $media: " + if (answer.ok) answer.text else withPrefix(answer.text)
+        }
+        return parts.joinToString(" · ")
+    }
+
+    private fun withWhatsapp(answer: Probe.Result, extra: String): Probe.Result =
+        Probe.Result(answer.ok, answer.text + "\n" + extra)
+
     private fun showResult(answer: Probe.Result, square: ImageView?) {
         setProbesBusy(false)
         result.text = if (answer.ok) answer.text else withPrefix(answer.text)
@@ -547,7 +603,8 @@ class MainActivity : AppCompatActivity() {
         setProbesBusy(true)
         Thread {
             val answer = Probe.proxy(store.port, store.user, store.password)
-            runOnUiThread { showResult(answer, proxySquare) }
+            val extra = whatsappLines()
+            runOnUiThread { showResult(if (extra.isEmpty()) answer else withWhatsapp(answer, extra), proxySquare) }
         }.apply { isDaemon = true }.start()
     }
 

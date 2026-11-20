@@ -44,6 +44,10 @@ object Config {
         proxyDomains: List<String> = emptyList(),
         viaServer: Boolean = true,
         httpPort: Int = 0,
+        waChatPort: Int = 0,
+        waMediaPort: Int = 0,
+        waCertFile: String? = null,
+        waKeyFile: String? = null,
     ): JSONObject {
         require(port in 1024..65535) { "порт должен быть от 1024 до 65535" }
         require(user.isNotBlank()) { "нужен логин SOCKS: без него к прокси подключится кто угодно" }
@@ -76,6 +80,41 @@ object Config {
                     .put("accounts", JSONArray().put(JSONObject().put("user", user).put("pass", password)))))
         }
 
+        // WhatsApp's own proxy ports. The client expects the same thing Meta's proxy does:
+        // TLS on the chat port (self-signed, which the client accepts) and raw TCP on the media
+        // port. Both are plain forwarders — the end-to-end encryption stays inside the client,
+        // and we only hand the bytes to the tunnel.
+        if (waChatPort > 0 && waCertFile != null && waKeyFile != null) {
+            inbounds.put(JSONObject()
+                .put("tag", "wa-chat")
+                .put("listen", LISTEN)
+                .put("port", waChatPort)
+                .put("protocol", "dokodemo-door")
+                .put("settings", JSONObject()
+                    .put("address", "g.whatsapp.net")
+                    .put("port", 5222)
+                    .put("network", "tcp")
+                    .put("followRedirect", false))
+                .put("streamSettings", JSONObject()
+                    .put("network", "tcp")
+                    .put("security", "tls")
+                    .put("tlsSettings", JSONObject().put("certificates", JSONArray().put(
+                        JSONObject().put("certificateFile", waCertFile).put("keyFile", waKeyFile),
+                    )))))
+        }
+        if (waMediaPort > 0) {
+            inbounds.put(JSONObject()
+                .put("tag", "wa-media")
+                .put("listen", LISTEN)
+                .put("port", waMediaPort)
+                .put("protocol", "dokodemo-door")
+                .put("settings", JSONObject()
+                    .put("address", "whatsapp.net")
+                    .put("port", 443)
+                    .put("network", "tcp")
+                    .put("followRedirect", false)))
+        }
+
         val outbounds = JSONArray()
         if (server != null && viaServer) {
             outbounds.put(server.outbound())
@@ -96,6 +135,16 @@ object Config {
             if (through.isNotEmpty()) {
                 rules.put(JSONObject().put("type", "field")
                     .put("domain", JSONArray(through))
+                    .put("outboundTag", "proxy"))
+            }
+            // the WhatsApp doors carry their own destination, so they need a rule of their own:
+            // otherwise the domain rules would send g.whatsapp.net straight out
+            val waTags = JSONArray()
+            if (waChatPort > 0) waTags.put("wa-chat")
+            if (waMediaPort > 0) waTags.put("wa-media")
+            if (waTags.length() > 0) {
+                rules.put(JSONObject().put("type", "field")
+                    .put("inboundTag", waTags)
                     .put("outboundTag", "proxy"))
             }
             val direct = directDomains.map { it.trim() }.filter { it.isNotBlank() }

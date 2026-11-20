@@ -116,6 +116,59 @@ object Probe {
         }
     }
 
+
+    /**
+     * Does a WhatsApp door answer, and whose certificate comes back?
+     *
+     * The chat door presents our own self-signed certificate (that is what Meta's own proxy does),
+     * the media door forwards straight to `whatsapp.net`, so the certificate there must be Meta's.
+     * Telling those two apart is exactly what a "медиа недоступно" complaint needs: it separates
+     * "the kernel is not listening" from "the traffic does not reach WhatsApp".
+     */
+
+    /** Trusts the certificate the chat door presents, which is ours and self-signed by design. */
+    private fun ownCertificateFactory(): SSLSocketFactory {
+        val trustAll = arrayOf<javax.net.ssl.TrustManager>(object : javax.net.ssl.X509TrustManager {
+            override fun checkClientTrusted(chain: Array<out java.security.cert.X509Certificate>?, authType: String?) = Unit
+            override fun checkServerTrusted(chain: Array<out java.security.cert.X509Certificate>?, authType: String?) = Unit
+            override fun getAcceptedIssuers(): Array<java.security.cert.X509Certificate> = emptyArray()
+        })
+        val context = javax.net.ssl.SSLContext.getInstance("TLS")
+        context.init(null, trustAll, java.security.SecureRandom())
+        return context.socketFactory
+    }
+
+    fun whatsappPort(port: Int, expectOwnCertificate: Boolean, timeoutMs: Int = 8000): Result = try {
+        val started = System.currentTimeMillis()
+        val raw = java.net.Socket()
+        raw.connect(java.net.InetSocketAddress("127.0.0.1", port), timeoutMs)
+        raw.soTimeout = timeoutMs
+        // The chat door presents OUR self-signed certificate — that is the design, the same one
+        // Meta's proxy uses — so verifying it against the system roots would report a failure
+        // where everything is in fact fine. The media door is a passthrough, and there the
+        // certificate must come from Meta; a permissive context would hide exactly that.
+        val factory = if (expectOwnCertificate) ownCertificateFactory() else SSLSocketFactory.getDefault() as SSLSocketFactory
+        val serverName = if (expectOwnCertificate) "proxy.whatsapp.net" else "whatsapp.net"
+        val tls = factory.createSocket(raw, serverName, port, true) as javax.net.ssl.SSLSocket
+        try {
+            tls.startHandshake()
+            val issuer = tls.session.peerCertificates.firstOrNull()
+                ?.let { (it as? java.security.cert.X509Certificate)?.issuerDN?.name }
+                .orEmpty()
+            val own = issuer.contains("proxy.whatsapp.net")
+            val ms = System.currentTimeMillis() - started
+            when {
+                expectOwnCertificate && !own -> Result(false, "не наш сертификат: $issuer")
+                !expectOwnCertificate && own -> Result(false, "вернулся наш сертификат вместо whatsapp.net")
+                else -> Result(true, "$ms мс")
+            }
+        } finally {
+            runCatching { tls.close() }
+        }
+    } catch (error: IOException) {
+        Result(false, short(error))
+    }
+
     fun socksHttps(
         port: Int,
         user: String,

@@ -138,6 +138,21 @@ class Store(context: Context) {
         set(value) = prefs.edit().putInt("http-port", value).apply()
 
     /**
+     * Локальный прокси для WhatsApp: порт чата (текст) и порт медиа.
+     *
+     * WhatsApp умеет ходить через прокси, который для него выглядит как ещё один его сервер:
+     * на порту чата клиент ждёт TLS, на порту медиа — обычный TCP. Ноль означает «выключено»,
+     * как и у HTTP-порта выше.
+     */
+    var waChatPort: Int
+        get() = prefs.getInt("wa-chat-port", 0)
+        set(value) = prefs.edit().putInt("wa-chat-port", value).apply()
+
+    var waMediaPort: Int
+        get() = prefs.getInt("wa-media-port", 0)
+        set(value) = prefs.edit().putInt("wa-media-port", value).apply()
+
+    /**
      * The SOCKS credentials.
      *
      * Generated once on first launch and then kept: a proxy without a password is reachable by
@@ -210,6 +225,11 @@ class Store(context: Context) {
     var configDirty: Boolean
         get() = prefs.getBoolean("config-dirty", false)
         set(value) = prefs.edit().putBoolean("config-dirty", value).apply()
+
+    /** Спрашивали ли уже про исключение из оптимизации батареи. */
+    var askedBatteryFreedom: Boolean
+        get() = prefs.getBoolean("askedBatteryFreedom", false)
+        set(value) = prefs.edit().putBoolean("askedBatteryFreedom", value).apply()
 
     /** The subscription URL, when the person uses one. */
     var subscription: String

@@ -8,6 +8,7 @@ import android.app.Service
 import android.content.Context
 import android.content.Intent
 import android.os.Build
+import android.os.PowerManager
 import android.os.IBinder
 import ru.uvw.byecensor.logic.Config
 import ru.uvw.byecensor.store.Store
@@ -27,6 +28,15 @@ import java.util.concurrent.CopyOnWriteArrayList
  */
 class ProxyService : Service() {
     private var process: Process? = null
+    /**
+     * Kept while the kernel runs.
+     *
+     * A foreground service keeps the process out of the freezer in theory; on phones that add
+     * their own battery rules (Nothing OS among them) it is not enough, and the socket keeps
+     * accepting connections that nobody serves — an app sees "connected, then no network". A
+     * partial wake lock is the one thing those rules respect.
+     */
+    private var wakeLock: PowerManager.WakeLock? = null
     private var reader: Thread? = null
     /** Set while we are deliberately replacing the kernel, so its exit is not reported as a crash. */
     private var replacing = false
@@ -52,6 +62,7 @@ class ProxyService : Service() {
         if (process != null) return START_STICKY
         startForeground(NOTIFICATION_ID, notification("Запускаю ядро…"))
         val started = runCatching { launchKernel() }
+        started.onSuccess { holdWakeLock() }
         started.onFailure { fail(it.message ?: "ядро не запустилось") }
         return if (started.isSuccess) START_STICKY else START_NOT_STICKY
     }
@@ -60,6 +71,7 @@ class ProxyService : Service() {
     private fun replaceKernel() {
         stopKernel(replacing = true)
         val started = runCatching { launchKernel() }
+        started.onSuccess { holdWakeLock() }
         started.onFailure { fail(it.message ?: "ядро не запустилось") }
     }
 
@@ -68,9 +80,11 @@ class ProxyService : Service() {
         val store = Store(this)
         val server = store.selected()
         val viaServer = store.viaServer && server != null
+        val (certFile, keyFile) = waCertificate()
         val config = Config.build(
             server, store.port, store.user, store.password,
             store.directDomains, store.proxyDomains, viaServer, store.httpPort,
+            store.waChatPort, store.waMediaPort, certFile, keyFile,
         )
         startKernel(config.toString())
     }
@@ -78,6 +92,29 @@ class ProxyService : Service() {
     override fun onDestroy() {
         stopKernel(replacing = false)
         super.onDestroy()
+    }
+
+
+    /**
+     * The self-signed certificate the WhatsApp chat port presents.
+     *
+     * Meta's own proxy does exactly this: the client expects TLS on the chat port and accepts a
+     * self-signed certificate, because the transport is not what protects the conversation — the
+     * end-to-end encryption inside it does. The pair ships in the APK's assets and is copied once
+     * to the app's own directory, where the kernel can read it by path.
+     */
+    private fun waCertificate(): Pair<String?, String?> {
+        val cert = File(filesDir, "wa-proxy.crt")
+        val key = File(filesDir, "wa-proxy.key")
+        runCatching {
+            if (!cert.exists()) assets.open("wa-proxy.crt").use { input ->
+                cert.outputStream().use { input.copyTo(it) }
+            }
+            if (!key.exists()) assets.open("wa-proxy.key").use { input ->
+                key.outputStream().use { input.copyTo(it) }
+            }
+        }
+        return if (cert.exists() && key.exists()) cert.absolutePath to key.absolutePath else null to null
     }
 
     private fun startKernel(config: String): Unit {
@@ -144,6 +181,20 @@ class ProxyService : Service() {
         assets.open(name).use { input -> target.outputStream().use { input.copyTo(it) } }
     }
 
+    private fun holdWakeLock() {
+        if (wakeLock?.isHeld == true) return
+        val power = getSystemService(PowerManager::class.java) ?: return
+        wakeLock = power.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "byecensor:kernel").apply {
+            setReferenceCounted(false)
+            runCatching { acquire() }
+        }
+    }
+
+    private fun releaseWakeLock() {
+        wakeLock?.let { runCatching { if (it.isHeld) it.release() } }
+        wakeLock = null
+    }
+
     private fun stopKernel(replacing: Boolean) {
         this.replacing = replacing
         process?.let { proc ->
@@ -154,6 +205,7 @@ class ProxyService : Service() {
         reader = null
         State.running = false
         State.ready = false
+        if (!replacing) releaseWakeLock()
     }
 
     private fun fail(message: String) {

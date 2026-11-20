@@ -155,6 +155,32 @@ class SectionActivity : AppCompatActivity() {
                 "Логин и пароль у него те же").apply {
             setPadding(dp(28), dp(2), dp(28), dp(6))
         })
+
+        root.addView(valueRow("Порт WhatsApp (чат)", store.waChatPort.toString()) { value ->
+            val port = value.toIntOrNull()
+            if (port == null || (port != 0 && port !in 1024..65535)) {
+                toast("0 — выключить, иначе порт от 1024 до 65535")
+            } else {
+                store.waChatPort = port
+                saved()
+            }
+        })
+        root.addView(valueRow("Порт WhatsApp (медиа)", store.waMediaPort.toString()) { value ->
+            val port = value.toIntOrNull()
+            if (port == null || (port != 0 && port !in 1024..65535)) {
+                toast("0 — выключить, иначе порт от 1024 до 65535")
+            } else {
+                store.waMediaPort = port
+                saved()
+            }
+        })
+        root.addView(Ui.line(this,
+            "WhatsApp умеет ходить через собственный прокси-сервер. Впиши порт чата и порт медиа " +
+                "(0 — выключено), а в самом WhatsApp укажи хост 127.0.0.1 и эти порты: " +
+                "Настройки → Данные и хранилище → Прокси → Настроить прокси. Звонки через прокси " +
+                "не работают — это ограничение WhatsApp, а не приложения").apply {
+            setPadding(dp(28), dp(2), dp(28), dp(6))
+        })
         root.addView(Ui.line(this, "Эти значения вводятся в приложении, которое будет ходить через прокси").apply {
             setPadding(dp(28), dp(10), dp(28), 0)
         })

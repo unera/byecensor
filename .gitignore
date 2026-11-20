@@ -14,3 +14,6 @@ app/src/main/assets/*.dat
 # Signing material never lives in a repository
 *.jks
 *.keystore
+
+# Ключ локального прокси WhatsApp — та же тайна, что и пароль
+app/src/main/assets/wa-proxy.key
