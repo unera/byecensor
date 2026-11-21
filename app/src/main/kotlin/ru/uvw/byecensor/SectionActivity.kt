@@ -182,12 +182,22 @@ class SectionActivity : AppCompatActivity() {
             setPadding(dp(28), dp(2), dp(28), dp(6))
         })
         root.addView(Ui.card(this).apply {
-            addView(Ui.line(this@SectionActivity,
-                "Мультиплексирование: " + if (store.muxEnabled) "включено" else "выключено"))
+            val label = Ui.line(this@SectionActivity, "")
+            val paint = {
+                label.text = "Мультиплексирование: " + if (store.muxEnabled) "включено" else "выключено"
+                label.setTextColor(
+                    if (store.muxEnabled) Color.parseColor("#7bd88f") else Color.parseColor("#e0574f"),
+                )
+            }
+            paint()
+            addView(label)
             setOnClickListener {
                 store.muxEnabled = !store.muxEnabled
-                saved()
-                recreate()
+                // no recreate here: re-creating the screen threw the person back a level,
+                // and this row is readable on its own without a redraw
+                store.configDirty = true
+                paint()
+                toast(if (store.muxEnabled) "мультиплексирование включено" else "выключено")
             }
         })
         root.addView(Ui.line(this,
