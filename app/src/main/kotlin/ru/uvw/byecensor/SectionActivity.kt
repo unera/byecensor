@@ -181,13 +181,14 @@ class SectionActivity : AppCompatActivity() {
                 "не работают — это ограничение WhatsApp, а не приложения").apply {
             setPadding(dp(28), dp(2), dp(28), dp(6))
         })
-        root.addView(valueRow(
-            "Мультиплексирование",
-            if (store.muxEnabled) "включено" else "выключено",
-        ) { _ ->
-            store.muxEnabled = !store.muxEnabled
-            saved()
-            recreate()
+        root.addView(Ui.card(this).apply {
+            addView(Ui.line(this@SectionActivity,
+                "Мультиплексирование: " + if (store.muxEnabled) "включено" else "выключено"))
+            setOnClickListener {
+                store.muxEnabled = !store.muxEnabled
+                saved()
+                recreate()
+            }
         })
         root.addView(Ui.line(this,
             "Одно соединение на все запросы вместо нового на каждый. Меньше поводов " +
