@@ -312,6 +312,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun refresh() {
+        pendingTicker.removeCallbacks(tick)
         val configured = store.servers.isNotEmpty()
         val running = ProxyService.State.running
         val ready = ProxyService.State.ready
@@ -524,7 +525,22 @@ class MainActivity : AppCompatActivity() {
     }
 
     /** The wait before a verdict: white, because it is neither good news nor bad yet. */
+    private var pendingSeconds = 0
+    private val pendingTicker = android.os.Handler(android.os.Looper.getMainLooper())
+    private val tick = object : Runnable {
+        override fun run() {
+            pendingSeconds += 1
+            result.text = pendingText + " " + pendingSeconds + " с"
+            pendingTicker.postDelayed(this, 1000)
+        }
+    }
+    private var pendingText = ""
+
     private fun pending(text: String) {
+        pendingText = text
+        pendingSeconds = 0
+        pendingTicker.removeCallbacks(tick)
+        pendingTicker.postDelayed(tick, 1000)
         result.text = text
         result.setTextColor(Color.WHITE)
     }
@@ -599,6 +615,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun showResult(answer: Probe.Result, square: ImageView?) {
+        pendingTicker.removeCallbacks(tick)
         setProbesBusy(false)
         result.text = if (answer.ok) answer.text else withPrefix(answer.text)
         result.setTextColor(
@@ -615,6 +632,7 @@ class MainActivity : AppCompatActivity() {
 
     /** Is the upstream reachable: the question about the chosen server. */
     private fun testUplink() {
+        refreshNetwork()
         val server = store.selected() ?: run {
             result.text = "сервер не выбран"
             return
@@ -646,6 +664,13 @@ class MainActivity : AppCompatActivity() {
         if (run != probeRun || run == probeDone) return false
         probeDone = run
         return true
+    }
+
+    /** Probes must leave through the network the phone is on now, not through a stale default. */
+    private fun refreshNetwork() {
+        Probe.network = runCatching {
+            getSystemService(android.net.ConnectivityManager::class.java)?.activeNetwork
+        }.getOrNull()
     }
 
     private fun testProxy() {

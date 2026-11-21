@@ -138,6 +138,9 @@ class ProxyService : Service() {
 
     /** Build the config from the store and start the kernel with it. */
     private fun launchKernel() {
+        Probe.network = runCatching {
+            getSystemService(ConnectivityManager::class.java)?.activeNetwork
+        }.getOrNull()
         val store = Store(this)
         val server = store.selected()
         val viaServer = store.viaServer && server != null

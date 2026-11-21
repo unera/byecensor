@@ -30,6 +30,17 @@ object Probe {
     var stage: String = ""
         private set
 
+    /**
+     * The network the phone is actually using right now.
+     *
+     * Without this a socket goes out through whatever the system considers default at that
+     * instant; while the phone is waking its radio or switching between Wi-Fi and mobile data,
+     * that choice can be a path that no longer exists, and the connect stalls until it times out
+     * and only the second attempt succeeds.
+     */
+    @Volatile
+    var network: android.net.Network? = null
+
     private fun at(stage: String) {
         this.stage = stage
     }
@@ -61,12 +72,13 @@ object Probe {
      * This cannot prove the proxy will work — the server may reject the key — but it proves the
      * network path, which is the first thing to rule out.
      */
-    fun server(server: Server, timeoutMs: Int = 6000, attempts: Int = 2): Result {
+    fun server(server: Server, timeoutMs: Int = 3500, attempts: Int = 3): Result {
         var last = ""
         repeat(attempts) { attempt ->
             val started = System.currentTimeMillis()
             val answer = try {
                 Socket().use { socket ->
+                    network?.let { runCatching { it.bindSocket(socket) } }
                     socket.connect(InetSocketAddress(server.host, server.port), timeoutMs)
                     val ms = System.currentTimeMillis() - started
                     Result(true, "${server.host}:${server.port} отвечает, ${ms} мс")
@@ -78,7 +90,7 @@ object Probe {
             last = answer.text
             // A single lost reply is worth one more try: on a phone the radio is asleep between
             // probes, and the first connection after an idle period pays for waking it up.
-            if (attempt < attempts - 1) Thread.sleep(700)
+            if (attempt < attempts - 1) Thread.sleep(400)
         }
         return Result(false, last)
     }
