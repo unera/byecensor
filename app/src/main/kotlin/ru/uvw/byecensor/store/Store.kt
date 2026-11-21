@@ -12,6 +12,11 @@ import ru.uvw.byecensor.logic.Server
  * Stored as JSON in one preference so a backup is one string, and so a subscription refresh can
  * replace the list without touching the settings around it.
  */
+object SpeedDefaults {
+    const val DEFAULT_SPEED_URL =
+        "https://speed.cloudflare.com/__down?bytes=20971520"
+}
+
 class Store(context: Context) {
     private val prefs = context.getSharedPreferences("ByeCensor", Context.MODE_PRIVATE)
 
@@ -151,6 +156,18 @@ class Store(context: Context) {
     var waMediaPort: Int
         get() = prefs.getInt("wa-media-port", 0)
         set(value) = prefs.edit().putInt("wa-media-port", value).apply()
+
+    /**
+     * Что качать для теста скорости.
+     *
+     * Умолчание — файл Cloudflare: он отдаёт ровно столько байт, сколько попросишь, работает по
+     * HTTPS и не требует авторизации. Адрес можно заменить своим, если хочется мерить именно
+     * свой сервер.
+     */
+    var speedUrl: String
+        get() = prefs.getString("speed-url", SpeedDefaults.DEFAULT_SPEED_URL)
+            ?: SpeedDefaults.DEFAULT_SPEED_URL
+        set(value) = prefs.edit().putString("speed-url", value.trim()).apply()
 
     /**
      * The SOCKS credentials.

@@ -46,6 +46,7 @@ class MainActivity : AppCompatActivity() {
     private lateinit var probes: LinearLayout
     private lateinit var uplinkSquare: ImageView
     private lateinit var proxySquare: ImageView
+    private lateinit var speedSquare: ImageView
     private lateinit var chevron: TextView
     private var expanded = true
     private val ticker = Handler(Looper.getMainLooper())
@@ -200,6 +201,10 @@ class MainActivity : AppCompatActivity() {
             val proxy = probeColumn("тест", R.drawable.ic_proxy, "проверить прокси") { testProxy() }
             proxySquare = proxy.first
             addView(proxy.second)
+
+            val speed = probeColumn("тест", R.drawable.ic_uplink, "скорость") { testSpeed() }
+            speedSquare = speed.first
+            addView(speed.second)
         }
         root.addView(probes)
 
@@ -560,6 +565,24 @@ class MainActivity : AppCompatActivity() {
     private fun withWhatsapp(answer: Probe.Result, extra: String): Probe.Result =
         Probe.Result(answer.ok, answer.text + "\n" + extra)
 
+
+    /** Download the configured file through the tunnel and report the rate. */
+    private fun testSpeed() {
+        if (!ProxyService.State.running) {
+            result.text = "прокси не запущен"
+            return
+        }
+        pending("меряю скорость…")
+        setProbesBusy(true)
+        Thread {
+            val answer = Probe.speed(store.speedUrl, store.port, store.user, store.password)
+            runOnUiThread {
+                showResult(answer, speedSquare)
+                speedSquare.setImageResource(R.drawable.ic_uplink)
+            }
+        }.apply { isDaemon = true }.start()
+    }
+
     private fun showResult(answer: Probe.Result, square: ImageView?) {
         setProbesBusy(false)
         result.text = if (answer.ok) answer.text else withPrefix(answer.text)
@@ -653,14 +676,13 @@ class MainActivity : AppCompatActivity() {
 
     /** While a probe runs, neither asks again: a second tap would race the first answer. */
     private fun setProbesBusy(busy: Boolean) {
-        for (square in listOfNullable(uplinkSquare, proxySquare)) {
+        for (square in listOfNullable(uplinkSquare, proxySquare, speedSquare)) {
             square?.isEnabled = !busy
             square?.alpha = if (busy) 0.4f else 1f
         }
     }
 
-    private fun listOfNullable(first: ImageView?, second: ImageView?): List<ImageView?> =
-        listOf(first, second)
+    private fun listOfNullable(vararg squares: ImageView?) = squares.filterNotNull()
 
     private fun menu() {
         val items = arrayOf("Вставить ссылку из буфера", "Проверить прокси", "Настройки")

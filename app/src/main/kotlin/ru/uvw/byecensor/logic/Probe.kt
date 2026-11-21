@@ -206,6 +206,91 @@ object Probe {
         Result(false, short(error))
     }
 
+
+    /**
+     * How fast the tunnel actually is: pull a known URL through the local proxy and time it.
+     *
+     * The point is not a benchmark score but the answer to "is the tunnel alive and is it usable
+     * right now", which no ping can give: a chain can answer handshakes and still crawl. The URL
+     * comes from the settings, so an operator can point it at their own server; the default is a
+     * neutral file with a fixed size.
+     *
+     * @returns megabytes per second, the time to the first byte, and how much actually arrived.
+     */
+    fun speed(
+        url: String,
+        port: Int,
+        user: String,
+        password: String,
+        maxBytes: Long = 32L * 1024 * 1024,
+        timeoutMs: Int = 20_000,
+    ): Result {
+        val uri = try {
+            java.net.URI(url)
+        } catch (error: Exception) {
+            return Result(false, "не разобрал адрес: ${error.message}")
+        }
+        if (uri.scheme != "https" && uri.scheme != "http") return Result(false, "нужен http(s)-адрес")
+        val host = uri.host ?: return Result(false, "в адресе нет хоста")
+        val secure = uri.scheme == "https"
+        val hostPort = if (uri.port > 0) uri.port else if (secure) 443 else 80
+        val path = (uri.rawPath?.ifBlank { "/" } ?: "/") + (uri.rawQuery?.let { "?$it" } ?: "")
+
+        var socket: Socket? = null
+        return try {
+            val started = System.currentTimeMillis()
+            val raw = open(port, user, password, host, hostPort, timeoutMs)
+            socket = if (secure) {
+                (SSLSocketFactory.getDefault() as SSLSocketFactory)
+                    .createSocket(raw, host, hostPort, true) as javax.net.ssl.SSLSocket
+            } else {
+                raw
+            }
+            (socket as? javax.net.ssl.SSLSocket)?.startHandshake()
+            val request = "GET $path HTTP/1.1\r\nHost: $host\r\n" +
+                "User-Agent: byecensor\r\nAccept: */*\r\nConnection: close\r\n\r\n"
+            socket.getOutputStream().apply { write(request.toByteArray()); flush() }
+
+            val input = java.io.BufferedInputStream(socket.getInputStream(), 64 * 1024)
+            // header first, then the body: the first byte of the body tells whether the tunnel is
+            // warm at all, the rest is throughput
+            val header = StringBuilder()
+            while (!header.endsWith("\r\n\r\n")) {
+                val byte = input.read()
+                if (byte < 0) return Result(false, "сервер закрыл соединение до ответа")
+                header.append(byte.toChar())
+                if (header.length > 16_384) return Result(false, "ответ без заголовков")
+            }
+            val status = header.lineSequence().firstOrNull().orEmpty()
+            if (!status.contains(" 200") && !status.contains(" 206")) {
+                return Result(false, "сервер ответил: ${status.take(60)}")
+            }
+            val firstByteAt = System.currentTimeMillis()
+            var total = 0L
+            val buffer = ByteArray(64 * 1024)
+            while (total < maxBytes) {
+                val read = input.read(buffer)
+                if (read < 0) break
+                total += read
+            }
+            val elapsed = System.currentTimeMillis() - started
+            if (total <= 0) {
+                Result(false, "тело ответа пустое")
+            } else {
+                val mb = total / (1024.0 * 1024.0)
+                val seconds = (System.currentTimeMillis() - firstByteAt) / 1000.0
+                val rate = if (seconds > 0) mb / seconds else mb
+                val ttfb = firstByteAt - started
+                Result(true, String.format("%.1f МБ за %.1f с · %.2f МБ/с · первый байт %d мс",
+                    mb, elapsed / 1000.0, rate, ttfb))
+            }
+        } catch (error: IOException) {
+            Result(false, short(error))
+        } finally {
+            runCatching { socket?.close() }
+        }
+    }
+
     /**
      * SOCKS5 with a password, then CONNECT to the target.
      *

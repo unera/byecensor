@@ -181,6 +181,19 @@ class SectionActivity : AppCompatActivity() {
                 "не работают — это ограничение WhatsApp, а не приложения").apply {
             setPadding(dp(28), dp(2), dp(28), dp(6))
         })
+        root.addView(valueRow("Адрес теста скорости", store.speedUrl) { value ->
+            if (!value.startsWith("http")) {
+                toast("нужен адрес вида https://…")
+            } else {
+                store.speedUrl = value
+                saved()
+            }
+        })
+        root.addView(Ui.line(this,
+            "Кнопка «скорость» на главном экране скачивает этот адрес через туннель и показывает " +
+                "скорость. По умолчанию — файл Cloudflare на двадцать мегабайт; можно указать свой").apply {
+            setPadding(dp(28), dp(2), dp(28), dp(6))
+        })
         root.addView(Ui.line(this, "Эти значения вводятся в приложении, которое будет ходить через прокси").apply {
             setPadding(dp(28), dp(10), dp(28), 0)
         })
