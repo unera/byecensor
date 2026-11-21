@@ -205,7 +205,7 @@ class MainActivity : AppCompatActivity() {
             addView(View(this@MainActivity).apply {
                 layoutParams = LinearLayout.LayoutParams(0, 1, 1f)
             })
-            val speed = probeColumn("тест", R.drawable.ic_uplink, "скорость") { testSpeed() }
+            val speed = probeColumn("тест", R.drawable.ic_speed, "скорость") { testSpeed() }
             speedSquare = speed.first
             addView(speed.second)
         }
@@ -575,13 +575,13 @@ class MainActivity : AppCompatActivity() {
             result.text = "прокси не запущен"
             return
         }
-        pending("меряю скорость…")
+        pending("измеряю скорость…")
         setProbesBusy(true)
         Thread {
             val answer = Probe.speed(store.speedUrl, store.port, store.user, store.password)
             runOnUiThread {
                 showResult(answer, speedSquare)
-                speedSquare.setImageResource(R.drawable.ic_uplink)
+                speedSquare.setImageResource(R.drawable.ic_speed)
             }
         }.apply { isDaemon = true }.start()
     }
