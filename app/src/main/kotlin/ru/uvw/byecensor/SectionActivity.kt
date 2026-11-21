@@ -182,16 +182,33 @@ class SectionActivity : AppCompatActivity() {
             setPadding(dp(28), dp(2), dp(28), dp(6))
         })
         root.addView(Ui.card(this).apply {
+            // mux cannot be combined with xtls-rprx-vision: that flow is a different framing on
+            // the same connection, and the kernel answers "unexpected response version". Saying so
+            // here is better than a switch that silently does nothing.
+            val flow = store.selected()?.flow.orEmpty()
+            val possible = flow.isBlank()
             val label = Ui.line(this@SectionActivity, "")
             val paint = {
-                label.text = "Мультиплексирование: " + if (store.muxEnabled) "включено" else "выключено"
+                label.text = when {
+                    !possible -> "Мультиплексирование: недоступно (в ссылке flow=$flow)"
+                    store.muxEnabled -> "Мультиплексирование: включено"
+                    else -> "Мультиплексирование: выключено"
+                }
                 label.setTextColor(
-                    if (store.muxEnabled) Color.parseColor("#7bd88f") else Color.parseColor("#e0574f"),
+                    when {
+                        !possible -> Color.parseColor("#9a9a9a")
+                        store.muxEnabled -> Color.parseColor("#7bd88f")
+                        else -> Color.parseColor("#e0574f")
+                    },
                 )
             }
             paint()
             addView(label)
             setOnClickListener {
+                if (!possible) {
+                    toast("эта конфигурация ходит с xtls-rprx-vision, mux с ней несовместим")
+                    return@setOnClickListener
+                }
                 store.muxEnabled = !store.muxEnabled
                 // no recreate here: re-creating the screen threw the person back a level,
                 // and this row is readable on its own without a redraw
