@@ -202,6 +202,9 @@ class MainActivity : AppCompatActivity() {
             proxySquare = proxy.first
             addView(proxy.second)
 
+            addView(View(this@MainActivity).apply {
+                layoutParams = LinearLayout.LayoutParams(0, 1, 1f)
+            })
             val speed = probeColumn("тест", R.drawable.ic_uplink, "скорость") { testSpeed() }
             speedSquare = speed.first
             addView(speed.second)
