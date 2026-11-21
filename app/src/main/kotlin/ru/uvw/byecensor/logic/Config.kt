@@ -48,6 +48,7 @@ object Config {
         waMediaPort: Int = 0,
         waCertFile: String? = null,
         waKeyFile: String? = null,
+        mux: Boolean = true,
     ): JSONObject {
         require(port in 1024..65535) { "порт должен быть от 1024 до 65535" }
         require(user.isNotBlank()) { "нужен логин SOCKS: без него к прокси подключится кто угодно" }
@@ -120,7 +121,7 @@ object Config {
 
         val outbounds = JSONArray()
         if (server != null && viaServer) {
-            outbounds.put(server.outbound())
+            outbounds.put(server.outbound(mux))
         }
         outbounds.put(JSONObject().put("tag", "direct").put("protocol", "freedom"))
         outbounds.put(JSONObject().put("tag", "block").put("protocol", "blackhole"))

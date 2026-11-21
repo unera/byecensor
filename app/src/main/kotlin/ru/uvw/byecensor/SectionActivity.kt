@@ -181,6 +181,20 @@ class SectionActivity : AppCompatActivity() {
                 "не работают — это ограничение WhatsApp, а не приложения").apply {
             setPadding(dp(28), dp(2), dp(28), dp(6))
         })
+        root.addView(valueRow(
+            "Мультиплексирование",
+            if (store.muxEnabled) "включено" else "выключено",
+        ) { _ ->
+            store.muxEnabled = !store.muxEnabled
+            saved()
+            recreate()
+        })
+        root.addView(Ui.line(this,
+            "Одно соединение на все запросы вместо нового на каждый. Меньше поводов " +
+                "придраться тому, кто считает соединения, но первый запрос платит за общую " +
+                "сессию. Не работает вместе с xtls-rprx-vision — там mux недоступен").apply {
+            setPadding(dp(28), dp(2), dp(28), dp(6))
+        })
         root.addView(valueRow("Адрес теста скорости", store.speedUrl) { value ->
             if (!value.startsWith("http")) {
                 toast("нужен адрес вида https://…")

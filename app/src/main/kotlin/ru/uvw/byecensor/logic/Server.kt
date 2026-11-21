@@ -39,17 +39,17 @@ data class Server(
     val fingerprint: String = "",
 ) {
     /** The xray outbound for this server, exactly as the kernel wants it. */
-    fun outbound(): JSONObject {
+    fun outbound(mux: Boolean = true): JSONObject {
         val outbound = JSONObject().put("tag", "proxy").put("protocol", protocol)
         // Mux keeps one connection for every stream instead of opening a new one per request:
         // less churn means less to notice for the middlebox that resets connections on volume.
         // It cannot be combined with xtls-rprx-vision — the server then speaks another framing and
         // the kernel reports "unexpected response version" — so mux is only for plain vless/vmess.
-        if (flow.isBlank() && (protocol == "vless" || protocol == "vmess")) {
+        if (mux && flow.isBlank() && (protocol == "vless" || protocol == "vmess")) {
             outbound.put("mux", JSONObject()
                 .put("enabled", true)
-                .put("concurrency", 8)
-                .put("xudpConcurrency", 8))
+                .put("concurrency", -1)
+                .put("xudpConcurrency", -1))
         }
         when (protocol) {
             "vless" -> {

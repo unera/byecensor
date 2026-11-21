@@ -148,7 +148,7 @@ class ProxyService : Service() {
         val config = Config.build(
             server, store.port, store.user, store.password,
             store.directDomains, store.proxyDomains, viaServer, store.httpPort,
-            store.waChatPort, store.waMediaPort, certFile, keyFile,
+            store.waChatPort, store.waMediaPort, certFile, keyFile, store.muxEnabled,
         )
         startKernel(config.toString())
     }

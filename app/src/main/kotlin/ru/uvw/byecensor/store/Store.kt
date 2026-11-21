@@ -164,6 +164,17 @@ class Store(context: Context) {
      * HTTPS и не требует авторизации. Адрес можно заменить своим, если хочется мерить именно
      * свой сервер.
      */
+    /**
+     * Multiplexing: one tunnel connection for every stream.
+     *
+     * Fewer connection establishments is exactly what matters when a middlebox watches them —
+     * but the first stream pays for the shared session, and parallel streams queue behind one
+     * another, so it is a switch rather than a law.
+     */
+    var muxEnabled: Boolean
+        get() = prefs.getBoolean("mux", true)
+        set(value) = prefs.edit().putBoolean("mux", value).apply()
+
     var speedUrl: String
         get() = prefs.getString("speed-url", SpeedDefaults.DEFAULT_SPEED_URL)
             ?: SpeedDefaults.DEFAULT_SPEED_URL
