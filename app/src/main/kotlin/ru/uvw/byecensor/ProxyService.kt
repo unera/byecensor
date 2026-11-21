@@ -42,6 +42,8 @@ class ProxyService : Service() {
     private var reader: Thread? = null
     /** Set while we are deliberately replacing the kernel, so its exit is not reported as a crash. */
     private var replacing = false
+    /** The user-facing ports, held open across kernel restarts. */
+    private val frontPorts = mutableListOf<FrontPort>()
 
     override fun onBind(intent: Intent?): IBinder? = null
 
@@ -63,6 +65,7 @@ class ProxyService : Service() {
         }
         if (process != null) return START_STICKY
         startForeground(NOTIFICATION_ID, notification("Запускаю ядро…"))
+        startFrontPorts()
         val started = runCatching { launchKernel() }
         started.onSuccess {
             holdWakeLock()
@@ -136,6 +139,34 @@ class ProxyService : Service() {
         healthThread?.start()
     }
 
+
+    /**
+     * Bind the ports the apps are pointed at, once per service lifetime.
+     *
+     * The kernel restarts often — on a network change, on a failed heartbeat, on a settings
+     * change — and every restart used to close these ports for a moment. Now they stay open and
+     * the kernel lives one step behind them.
+     */
+    private fun startFrontPorts() {
+        val store = Store(this)
+        val wanted = mutableListOf(store.port)
+        if (store.httpPort > 0) wanted += store.httpPort
+        for (port in wanted) {
+            if (frontPorts.any { it.port() == port }) continue
+            runCatching {
+                FrontPort(port, FrontPort.kernelPort(port)).also {
+                    it.start()
+                    frontPorts += it
+                }
+            }.onFailure { State.log("порт $port занять не удалось: ${it.message}") }
+        }
+    }
+
+    private fun stopFrontPorts() {
+        frontPorts.forEach { it.stop() }
+        frontPorts.clear()
+    }
+
     /** Build the config from the store and start the kernel with it. */
     private fun launchKernel() {
         Probe.network = runCatching {
@@ -146,8 +177,9 @@ class ProxyService : Service() {
         val viaServer = store.viaServer && server != null
         val (certFile, keyFile) = waCertificate()
         val config = Config.build(
-            server, store.port, store.user, store.password,
-            store.directDomains, store.proxyDomains, viaServer, store.httpPort,
+            server, FrontPort.kernelPort(store.port), store.user, store.password,
+            store.directDomains, store.proxyDomains, viaServer,
+            if (store.httpPort > 0) FrontPort.kernelPort(store.httpPort) else 0,
             store.waChatPort, store.waMediaPort, certFile, keyFile, store.muxEnabled,
         )
         startKernel(config.toString())
@@ -269,7 +301,10 @@ class ProxyService : Service() {
         reader = null
         State.running = false
         State.ready = false
-        if (!replacing) releaseWakeLock()
+        if (!replacing) {
+            releaseWakeLock()
+            stopFrontPorts()
+        }
     }
 
     private fun fail(message: String) {
