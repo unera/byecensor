@@ -640,9 +640,16 @@ class MainActivity : AppCompatActivity() {
         pending("проверяю прокси…")
         setProbesBusy(true)
         Thread {
-            val answer = Probe.proxy(store.port, store.user, store.password)
-            val failures = whatsappFailures()
-            runOnUiThread { showResult(combine(answer, failures), proxySquare) }
+            // Everything inside one guarded block: a probe that throws used to kill this thread
+            // and leave "проверяю прокси…" on screen forever.
+            val answer = try {
+                // 8 seconds per attempt: the whole run has to stay short enough to wait through
+                val proxy = Probe.proxy(store.port, store.user, store.password, timeoutMs = 8000)
+                combine(proxy, whatsappFailures())
+            } catch (error: Throwable) {
+                Probe.Result(false, "проверка сорвалась: " + (error.message ?: error.javaClass.simpleName))
+            }
+            runOnUiThread { showResult(answer, proxySquare) }
         }.apply { isDaemon = true }.start()
     }
 

@@ -102,10 +102,10 @@ object Probe {
      * Rather than reporting "не работает", try the plain-HTTP request as well and say which of the
      * two arrived: that difference is the diagnosis.
      */
-    fun proxy(port: Int, user: String, password: String): Result {
-        val secure = socksHttps(port, user, password)
+    fun proxy(port: Int, user: String, password: String, timeoutMs: Int = 12_000): Result {
+        val secure = socksHttps(port, user, password, timeoutMs = timeoutMs)
         if (secure.ok) return secure
-        val plain = socks(port, user, password)
+        val plain = socks(port, user, password, timeoutMs = timeoutMs)
         return when {
             plain.ok -> Result(
                 false,
@@ -138,7 +138,7 @@ object Probe {
         return context.socketFactory
     }
 
-    fun whatsappPort(port: Int, expectOwnCertificate: Boolean, timeoutMs: Int = 8000): Result = try {
+    fun whatsappPort(port: Int, expectOwnCertificate: Boolean, timeoutMs: Int = 4000): Result = try {
         val started = System.currentTimeMillis()
         val raw = java.net.Socket()
         raw.connect(java.net.InetSocketAddress("127.0.0.1", port), timeoutMs)
