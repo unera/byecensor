@@ -61,17 +61,26 @@ object Probe {
      * This cannot prove the proxy will work — the server may reject the key — but it proves the
      * network path, which is the first thing to rule out.
      */
-    fun server(server: Server, timeoutMs: Int = 5000): Result {
-        val started = System.currentTimeMillis()
-        return try {
-            Socket().use { socket ->
-                socket.connect(InetSocketAddress(server.host, server.port), timeoutMs)
-                val ms = System.currentTimeMillis() - started
-                Result(true, "${server.host}:${server.port} отвечает, ${ms} мс")
+    fun server(server: Server, timeoutMs: Int = 6000, attempts: Int = 2): Result {
+        var last = ""
+        repeat(attempts) { attempt ->
+            val started = System.currentTimeMillis()
+            val answer = try {
+                Socket().use { socket ->
+                    socket.connect(InetSocketAddress(server.host, server.port), timeoutMs)
+                    val ms = System.currentTimeMillis() - started
+                    Result(true, "${server.host}:${server.port} отвечает, ${ms} мс")
+                }
+            } catch (error: IOException) {
+                Result(false, "${server.host}:${server.port} не отвечает: ${error.message ?: "нет связи"}")
             }
-        } catch (error: IOException) {
-            Result(false, "${server.host}:${server.port} не отвечает: ${error.message ?: "нет связи"}")
+            if (answer.ok) return answer
+            last = answer.text
+            // A single lost reply is worth one more try: on a phone the radio is asleep between
+            // probes, and the first connection after an idle period pays for waking it up.
+            if (attempt < attempts - 1) Thread.sleep(700)
         }
+        return Result(false, last)
     }
 
     /**
