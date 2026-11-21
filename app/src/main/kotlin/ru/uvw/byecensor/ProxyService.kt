@@ -7,10 +7,12 @@ import android.app.PendingIntent
 import android.app.Service
 import android.content.Context
 import android.content.Intent
+import android.net.ConnectivityManager
 import android.os.Build
 import android.os.PowerManager
 import android.os.IBinder
 import ru.uvw.byecensor.logic.Config
+import ru.uvw.byecensor.logic.Probe
 import ru.uvw.byecensor.store.Store
 import java.io.File
 import java.util.concurrent.CopyOnWriteArrayList
@@ -62,7 +64,11 @@ class ProxyService : Service() {
         if (process != null) return START_STICKY
         startForeground(NOTIFICATION_ID, notification("Запускаю ядро…"))
         val started = runCatching { launchKernel() }
-        started.onSuccess { holdWakeLock() }
+        started.onSuccess {
+            holdWakeLock()
+            watchNetwork()
+            watchHealth()
+        }
         started.onFailure { fail(it.message ?: "ядро не запустилось") }
         return if (started.isSuccess) START_STICKY else START_NOT_STICKY
     }
@@ -73,6 +79,61 @@ class ProxyService : Service() {
         val started = runCatching { launchKernel() }
         started.onSuccess { holdWakeLock() }
         started.onFailure { fail(it.message ?: "ядро не запустилось") }
+    }
+
+
+    /**
+     * Two watchdogs, for two different failures this setup actually has.
+     *
+     * The first follows the network: a phone that moves between Wi-Fi and mobile data keeps the
+     * old tunnel open on a path that no longer exists, and every app then sees "connected, no
+     * internet" until someone toggles the switch by hand. A kernel restart on change is cheap.
+     *
+     * The second is a heartbeat through the tunnel itself: the local socket can stay open while
+     * the far side is dead, and nothing on this phone notices. Two failures in a row is enough
+     * to mean "restart", because a single one is usually just a slow moment.
+     */
+    private var networkCallback: android.net.ConnectivityManager.NetworkCallback? = null
+    private var healthThread: Thread? = null
+
+    private fun watchNetwork() {
+        if (networkCallback != null) return
+        val manager = getSystemService(ConnectivityManager::class.java) ?: return
+        val callback = object : android.net.ConnectivityManager.NetworkCallback() {
+            override fun onAvailable(network: android.net.Network) {
+                if (process == null) return
+                State.log("сеть сменилась: перезапускаю ядро")
+                replaceKernel()
+            }
+        }
+        runCatching { manager.registerDefaultNetworkCallback(callback) }
+        networkCallback = callback
+    }
+
+    private fun watchHealth() {
+        if (healthThread?.isAlive == true) return
+        healthThread = Thread {
+            val store = Store(this)
+            var failures = 0
+            while (process != null) {
+                Thread.sleep(45_000)
+                if (process == null) break
+                val answer = runCatching {
+                    Probe.socks(store.port, store.user, store.password, timeoutMs = 6000)
+                }.getOrNull()
+                if (answer?.ok == true) {
+                    failures = 0
+                } else {
+                    failures += 1
+                    if (failures >= 2 && process != null) {
+                        State.log("туннель не отвечает дважды: перезапускаю ядро")
+                        failures = 0
+                        replaceKernel()
+                    }
+                }
+            }
+        }.apply { isDaemon = true }
+        healthThread?.start()
     }
 
     /** Build the config from the store and start the kernel with it. */
