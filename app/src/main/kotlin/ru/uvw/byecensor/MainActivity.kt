@@ -549,25 +549,37 @@ class MainActivity : AppCompatActivity() {
     /** Show a probe's verdict: green when it worked, red when it did not, and on its own square. */
 
     /** "чат 1097: 12 мс · медиа 1096: нет соединения" — only when the doors are switched on. */
-    private fun whatsappLines(): String {
+    /**
+     * WhatsApp doors: silent when they answer, red and explicit when they do not.
+     *
+     * A working door needs no line — the operator pressed "test" to learn about a problem, not
+     * to read that everything is fine twice.
+     */
+    private fun whatsappFailures(): String {
         val chat = store.waChatPort
         val media = store.waMediaPort
         if (chat <= 0 && media <= 0) return ""
         val parts = mutableListOf<String>()
         if (chat > 0) {
             val answer = Probe.whatsappPort(chat, expectOwnCertificate = true)
-            parts += "WA чат $chat: " + if (answer.ok) answer.text else withPrefix(answer.text)
+            if (!answer.ok) parts += "WA чат $chat: " + withPrefix(answer.text)
         }
         if (media > 0) {
             val answer = Probe.whatsappPort(media, expectOwnCertificate = false)
-            parts += "WA медиа $media: " + if (answer.ok) answer.text else withPrefix(answer.text)
+            if (!answer.ok) parts += "WA медиа $media: " + withPrefix(answer.text)
         }
-        return parts.joinToString(" · ")
+        return parts.joinToString("\n")
     }
 
-    private fun withWhatsapp(answer: Probe.Result, extra: String): Probe.Result =
-        Probe.Result(answer.ok, answer.text + "\n" + extra)
-
+    /**
+     * The line to show after a run: the check's own verdict, or the WhatsApp doors' complaint.
+     * A failure anywhere decides the colour, because red is the only signal that needs acting on.
+     */
+    private fun combine(answer: Probe.Result, failures: String): Probe.Result = when {
+        failures.isEmpty() -> answer
+        answer.ok -> Probe.Result(false, failures)
+        else -> Probe.Result(false, answer.text + "\n" + failures)
+    }
 
     /** Download the configured file through the tunnel and report the rate. */
     private fun testSpeed() {
@@ -629,8 +641,8 @@ class MainActivity : AppCompatActivity() {
         setProbesBusy(true)
         Thread {
             val answer = Probe.proxy(store.port, store.user, store.password)
-            val extra = whatsappLines()
-            runOnUiThread { showResult(if (extra.isEmpty()) answer else withWhatsapp(answer, extra), proxySquare) }
+            val failures = whatsappFailures()
+            runOnUiThread { showResult(combine(answer, failures), proxySquare) }
         }.apply { isDaemon = true }.start()
     }
 

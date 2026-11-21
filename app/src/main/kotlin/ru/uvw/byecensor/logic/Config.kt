@@ -111,9 +111,10 @@ object Config {
                 .put("settings", JSONObject()
                     .put("address", "whatsapp.net")
                     .put("port", 443)
-                    // UDP as well: a call carries its audio over UDP when it can, and with a
-                    // TCP-only door it falls back to TCP and complains about the connection.
-                    .put("network", "tcp,udp")
+                    // TCP only, on purpose: with "tcp,udp" the door stopped answering altogether
+                    // on the kernel we ship (24.0.0), and a media port that is dead is worse than
+                    // one without UDP. Calls still work over TCP, they just report a worse line.
+                    .put("network", "tcp")
                     .put("followRedirect", false)))
         }
 
