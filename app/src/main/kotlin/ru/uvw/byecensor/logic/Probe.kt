@@ -20,6 +20,21 @@ object Probe {
     data class Result(val ok: Boolean, val text: String)
 
     /**
+     * What the probe is doing right now.
+     *
+     * A check that never ends is useless without this: "зависло" tells nobody which of the five
+     * blocking steps — SOCKS greeting, SOCKS reply, the TLS handshake, the request, the read —
+     * never came back.
+     */
+    @Volatile
+    var stage: String = ""
+        private set
+
+    private fun at(stage: String) {
+        this.stage = stage
+    }
+
+    /**
      * Read exactly what was asked for.
      *
      * A socket read may return fewer bytes than the buffer holds, and every leftover byte stays in
@@ -103,8 +118,10 @@ object Probe {
      * two arrived: that difference is the diagnosis.
      */
     fun proxy(port: Int, user: String, password: String, timeoutMs: Int = 12_000): Result {
+        at("проверка через HTTPS")
         val secure = socksHttps(port, user, password, timeoutMs = timeoutMs)
         if (secure.ok) return secure
+        at("проверка через HTTP")
         val plain = socks(port, user, password, timeoutMs = timeoutMs)
         return when {
             plain.ok -> Result(
@@ -140,6 +157,7 @@ object Probe {
 
     fun whatsappPort(port: Int, expectOwnCertificate: Boolean, timeoutMs: Int = 4000): Result = try {
         val started = System.currentTimeMillis()
+        at("соединение с портом $port")
         val raw = java.net.Socket()
         raw.connect(java.net.InetSocketAddress("127.0.0.1", port), timeoutMs)
         raw.soTimeout = timeoutMs
@@ -151,6 +169,7 @@ object Probe {
         val serverName = if (expectOwnCertificate) "proxy.whatsapp.net" else "whatsapp.net"
         val tls = factory.createSocket(raw, serverName, port, true) as javax.net.ssl.SSLSocket
         try {
+            at("рукопожатие с портом $port")
             tls.startHandshake()
             val issuer = tls.session.peerCertificates.firstOrNull()
                 ?.let { (it as? java.security.cert.X509Certificate)?.issuerDN?.name }
@@ -308,6 +327,7 @@ object Probe {
         hostPort: Int,
         timeoutMs: Int,
     ): Socket {
+        at("соединение с ядром")
         val socket = Socket()
         socket.connect(InetSocketAddress("127.0.0.1", port), timeoutMs)
         socket.soTimeout = timeoutMs

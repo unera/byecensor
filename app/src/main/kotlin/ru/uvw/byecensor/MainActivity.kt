@@ -660,19 +660,31 @@ class MainActivity : AppCompatActivity() {
         // outlast it. The watchdog is what guarantees the screen always ends with an answer.
         android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
             if (finishProbeRun(run)) {
-                showResult(Probe.Result(false, "проверка не уложилась в 20 секунд"), proxySquare)
+                showResult(Probe.Result(false, "проверка не уложилась: " + Probe.stage.ifBlank { "неизвестный шаг" }), proxySquare)
             }
         }, 20_000)
         Thread {
             val answer = try {
                 // 8 seconds per attempt: the whole run has to stay short enough to wait through
-                val proxy = Probe.proxy(store.port, store.user, store.password, timeoutMs = 8000)
-                combine(proxy, whatsappFailures())
+                Probe.proxy(store.port, store.user, store.password, timeoutMs = 8000)
             } catch (error: Throwable) {
                 Probe.Result(false, "проверка сорвалась: " + (error.message ?: error.javaClass.simpleName))
             }
             runOnUiThread {
                 if (finishProbeRun(run)) showResult(answer, proxySquare)
+            }
+        }.apply { isDaemon = true }.start()
+
+        // The WhatsApp doors get their own thread: they are a different question, and one slow
+        // door must not hold hostage the answer about the proxy itself.
+        Thread {
+            val failures = try {
+                whatsappFailures()
+            } catch (error: Throwable) {
+                "проверка входов WhatsApp сорвалась: " + (error.message ?: error.javaClass.simpleName)
+            }
+            if (failures.isNotEmpty()) {
+                runOnUiThread { if (run == probeRun) showResult(Probe.Result(false, failures), proxySquare) }
             }
         }.apply { isDaemon = true }.start()
     }
