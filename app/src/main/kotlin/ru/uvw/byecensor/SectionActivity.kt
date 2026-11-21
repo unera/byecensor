@@ -3,6 +3,7 @@ package ru.uvw.byecensor
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
+import android.content.Intent
 import android.graphics.Color
 import android.os.Bundle
 import android.text.InputType
@@ -181,6 +182,32 @@ class SectionActivity : AppCompatActivity() {
                 "не работают — это ограничение WhatsApp, а не приложения").apply {
             setPadding(dp(28), dp(2), dp(28), dp(6))
         })
+
+        // WhatsApp умеет принимать настройки ссылкой wa.me/proxy — тогда хост и порты оно
+        // заполняет само. Ссылка нужна только как повод открыть WhatsApp: человеку её видеть
+        // незачем, а если он пойдёт руками, у него под рукой те же два значения.
+        //
+        // Кнопка появляется только когда заданы оба порта. Ссылка с нулём в порту выглядит как
+        // удавшаяся настройка и не работает — худший вид ошибки, потому что её потом ищут глазами.
+        val waChat = store.waChatPort
+        val waMedia = store.waMediaPort
+        if (waChat > 0 && waMedia > 0) {
+            lateinit var button: TextView
+            button = Ui.button(this, "Настроить WhatsApp автоматически") {
+                configureWhatsApp(button, waChat, waMedia)
+            }
+            root.addView(button)
+            root.addView(Ui.line(this,
+                "Ядро перезапустится, потом откроется WhatsApp с уже вписанным адресом " +
+                    "127.0.0.1 и портами $waChat и $waMedia — останется нажать «Готово»").apply {
+                setPadding(dp(28), dp(2), dp(28), dp(6))
+            })
+        } else {
+            root.addView(Ui.line(this,
+                "Задай оба порта — и здесь появится кнопка, которая настроит WhatsApp сама").apply {
+                setPadding(dp(28), dp(2), dp(28), dp(6))
+            })
+        }
         root.addView(Ui.card(this).apply {
             // mux cannot be combined with xtls-rprx-vision: that flow is a different framing on
             // the same connection, and the kernel answers "unexpected response version". Saying so
@@ -538,6 +565,71 @@ class SectionActivity : AppCompatActivity() {
             .setPositiveButton("Сохранить") { _, _ -> done(input.text.toString().trim()) }
             .setNegativeButton(android.R.string.cancel, null)
             .show()
+    }
+
+    /**
+     * Restart the kernel, wait for both WhatsApp doors to answer, then hand WhatsApp a link that
+     * fills its proxy settings in by itself.
+     *
+     * The restart is not politeness. WhatsApp probes the proxy while it saves the settings, so a
+     * door that is not up yet — a port that was edited a minute ago, a kernel that is still being
+     * replaced — turns the whole gesture into "proxy unavailable", and the person has to find and
+     * undo half-filled settings by hand. Waiting for both doors is the difference between a button
+     * that works and a button that looks broken.
+     *
+     * The media door is checked against Meta's certificate, not ours: it is a passthrough, and a
+     * media port that answers with our certificate means the traffic is going somewhere else
+     * entirely. That check needs the tunnel to be alive, which is exactly the state WhatsApp needs
+     * too, so its failure is a real failure and worth saying out loud.
+     */
+    private fun configureWhatsApp(button: TextView, chat: Int, media: Int) {
+        button.isEnabled = false
+        button.alpha = 0.6f
+        button.text = "перезапускаю ядро…"
+        // reload replaces the kernel in place; start is for a proxy that is not running at all —
+        // reload on a stopped service builds a kernel without the front ports and watchers
+        if (ProxyService.State.running) ProxyService.reload(this) else ProxyService.start(this)
+        Thread {
+            val deadline = System.currentTimeMillis() + 25_000
+            var complaint: String? = null
+            var ready = false
+            while (System.currentTimeMillis() < deadline) {
+                val chatAnswer = Probe.whatsappPort(chat, expectOwnCertificate = true, timeoutMs = 1500)
+                if (!chatAnswer.ok) {
+                    complaint = "чат: ${chatAnswer.text}"
+                    Thread.sleep(400)
+                    continue
+                }
+                val mediaAnswer = Probe.whatsappPort(media, expectOwnCertificate = false, timeoutMs = 2000)
+                if (!mediaAnswer.ok) {
+                    complaint = "медиа: ${mediaAnswer.text}"
+                    Thread.sleep(400)
+                    continue
+                }
+                ready = true
+                break
+            }
+            runOnUiThread {
+                button.isEnabled = true
+                button.alpha = 1f
+                button.text = "Настроить WhatsApp автоматически"
+                if (!ready) {
+                    toast("прокси не поднялся — ${complaint ?: "двери не ответили за 25 секунд"}")
+                    return@runOnUiThread
+                }
+                val link = "https://wa.me/proxy?host=127.0.0.1&chatPort=$chat" +
+                    "&mediaPort=$media&chatTLS=true"
+                val opened = runCatching {
+                    startActivity(Intent(Intent.ACTION_VIEW, android.net.Uri.parse(link)))
+                }
+                if (opened.isFailure) {
+                    // WhatsApp не установлен: пусть хотя бы останется, что вписать руками
+                    val clipboard = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                    clipboard.setPrimaryClip(ClipData.newPlainText("WhatsApp", "127.0.0.1, $chat, $media"))
+                    toast("WhatsApp не открылся — адрес и порты скопированы в буфер")
+                }
+            }
+        }.apply { isDaemon = true }.start()
     }
 
     private fun checkSubscription() {
