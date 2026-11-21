@@ -632,6 +632,22 @@ class MainActivity : AppCompatActivity() {
     }
 
     /** Does traffic come out of the other end, over HTTPS. */
+    /** One run at a time: a second press cancels the right to display the first one's result. */
+    private var probeRun = 0
+    private var probeDone = 0
+
+    private fun startProbeRun(): Int {
+        probeRun += 1
+        return probeRun
+    }
+
+    /** Returns true only for the run that is still current and has not reported yet. */
+    private fun finishProbeRun(run: Int): Boolean {
+        if (run != probeRun || run == probeDone) return false
+        probeDone = run
+        return true
+    }
+
     private fun testProxy() {
         if (!ProxyService.State.running) {
             result.text = "прокси не запущен"
@@ -639,9 +655,15 @@ class MainActivity : AppCompatActivity() {
         }
         pending("проверяю прокси…")
         setProbesBusy(true)
+        val run = startProbeRun()
+        // A socket timeout is not a promise: DNS, a TLS handshake and a stalled tunnel can each
+        // outlast it. The watchdog is what guarantees the screen always ends with an answer.
+        android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
+            if (finishProbeRun(run)) {
+                showResult(Probe.Result(false, "проверка не уложилась в 20 секунд"), proxySquare)
+            }
+        }, 20_000)
         Thread {
-            // Everything inside one guarded block: a probe that throws used to kill this thread
-            // and leave "проверяю прокси…" on screen forever.
             val answer = try {
                 // 8 seconds per attempt: the whole run has to stay short enough to wait through
                 val proxy = Probe.proxy(store.port, store.user, store.password, timeoutMs = 8000)
@@ -649,7 +671,9 @@ class MainActivity : AppCompatActivity() {
             } catch (error: Throwable) {
                 Probe.Result(false, "проверка сорвалась: " + (error.message ?: error.javaClass.simpleName))
             }
-            runOnUiThread { showResult(answer, proxySquare) }
+            runOnUiThread {
+                if (finishProbeRun(run)) showResult(answer, proxySquare)
+            }
         }.apply { isDaemon = true }.start()
     }
 
