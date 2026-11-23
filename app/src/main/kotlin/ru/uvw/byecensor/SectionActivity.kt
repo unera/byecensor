@@ -157,6 +157,21 @@ class SectionActivity : AppCompatActivity() {
             setPadding(dp(28), dp(2), dp(28), dp(6))
         })
 
+        // Telegram принимает настройки прокси ссылкой t.me/socks: адрес, порт, логин и пароль
+        // оно вписывает само, и человеку не надо переносить четыре значения с экрана на экран.
+        // Логин и пароль берутся из текущих настроек, так что ссылка всегда описывает то, что
+        // действительно слушает 127.0.0.1.
+        lateinit var telegramButton: TextView
+        telegramButton = Ui.button(this, "Настроить Telegram автоматически") {
+            configureTelegram(telegramButton)
+        }
+        root.addView(telegramButton)
+        root.addView(Ui.line(this,
+            "Ядро перезапустится, потом откроется Telegram с уже вписанным прокси " +
+                "127.0.0.1:${store.port} — останется включить «Использовать прокси»").apply {
+            setPadding(dp(28), dp(2), dp(28), dp(6))
+        })
+
         root.addView(valueRow("Порт WhatsApp (чат)", store.waChatPort.toString()) { value ->
             val port = value.toIntOrNull()
             if (port == null || (port != 0 && port !in 1024..65535)) {
@@ -631,6 +646,65 @@ class SectionActivity : AppCompatActivity() {
             }
         }.apply { isDaemon = true }.start()
     }
+
+    /**
+     * Restart the kernel, wait until the SOCKS door really answers, then hand Telegram a link that
+     * fills its proxy settings in by itself.
+     *
+     * Same reasoning as the WhatsApp button: Telegram pings the proxy while it saves it, so a door
+     * that is still coming up turns the gesture into "прокси недоступен" and the person has to
+     * clean up half-filled settings. The link is built from the credentials this phone actually
+     * uses — a link with a stale password would look like a successful setup and fail on connect.
+     */
+    private fun configureTelegram(button: TextView) {
+        val port = store.port
+        val user = store.user
+        val password = store.password
+        button.isEnabled = false
+        button.alpha = 0.6f
+        button.text = "перезапускаю ядро…"
+        if (ProxyService.State.running) ProxyService.reload(this) else ProxyService.start(this)
+        Thread {
+            val deadline = System.currentTimeMillis() + 25_000
+            var complaint: String? = null
+            var ready = false
+            while (System.currentTimeMillis() < deadline) {
+                val answer = Probe.socks(port, user, password, timeoutMs = 3000)
+                if (answer.ok) {
+                    ready = true
+                    break
+                }
+                complaint = answer.text
+                Thread.sleep(400)
+            }
+            runOnUiThread {
+                button.isEnabled = true
+                button.alpha = 1f
+                button.text = "Настроить Telegram автоматически"
+                if (!ready) {
+                    toast("прокси не поднялся — ${complaint ?: "SOCKS не ответил за 25 секунд"}")
+                    return@runOnUiThread
+                }
+                val link = "https://t.me/socks?server=127.0.0.1&port=$port" +
+                    "&user=${encoded(user)}&pass=${encoded(password)}"
+                val opened = runCatching {
+                    startActivity(Intent(Intent.ACTION_VIEW, android.net.Uri.parse(link)))
+                }
+                if (opened.isFailure) {
+                    // Telegram не установлен: пусть хотя бы останется, что вписать руками
+                    val clipboard = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                    clipboard.setPrimaryClip(
+                        ClipData.newPlainText("Telegram", "127.0.0.1, $port, $user, $password"),
+                    )
+                    toast("Telegram не открылся — адрес, порт, логин и пароль скопированы в буфер")
+                }
+            }
+        }.apply { isDaemon = true }.start()
+    }
+
+    /** A value inside a t.me query: a password may contain anything the person typed. */
+    private fun encoded(value: String): String =
+        java.net.URLEncoder.encode(value, Charsets.UTF_8.name())
 
     private fun checkSubscription() {
         val url = store.subscription

@@ -15,6 +15,12 @@ import ru.uvw.byecensor.logic.Server
 object SpeedDefaults {
     const val DEFAULT_SPEED_URL =
         "https://speed.cloudflare.com/__down?bytes=20971520"
+
+}
+
+/** Логин SOCKS на первом запуске: одинаковый на всех телефонах, см. `Store.user`. */
+object AccessDefaults {
+    const val USER = "byecensor"
 }
 
 class Store(context: Context) {
@@ -183,17 +189,24 @@ class Store(context: Context) {
     /**
      * The SOCKS credentials.
      *
-     * Generated once on first launch and then kept: a proxy without a password is reachable by
-     * every app on the phone, and "не требуется" is not a setting this app offers.
+     * The login is the same on every phone — it is read aloud and typed by hand often enough that
+     * a unique one would only be something else to lose. The password is the opposite: it is
+     * minted from SecureRandom on the first launch of this installation (no stored value yet) and
+     * then kept, because a proxy without a password is reachable by every app on the phone, and
+     * "не требуется" is not a setting this app offers.
+     *
+     * SecureRandom, not the default generator: the default is seeded from the clock, and two
+     * phones set up minutes apart would get comparable sequences. A password that can be guessed
+     * from the install time is not a password.
      */
     var user: String
-        get() = prefs.getString("user", null) ?: generate("u").also {
+        get() = prefs.getString("user", null) ?: AccessDefaults.USER.also {
             prefs.edit().putString("user", it).apply()
         }
         set(value) = prefs.edit().putString("user", value.trim()).apply()
 
     var password: String
-        get() = prefs.getString("password", null) ?: generate("p").also {
+        get() = prefs.getString("password", null) ?: generate().also {
             prefs.edit().putString("password", it).apply()
         }
         set(value) = prefs.edit().putString("password", value.trim()).apply()
@@ -264,8 +277,13 @@ class Store(context: Context) {
         get() = prefs.getString("subscription", "") ?: ""
         set(value) = prefs.edit().putString("subscription", value.trim()).apply()
 
-    private fun generate(prefix: String): String {
-        val alphabet = "abcdefghijkmnopqrstuvwxyz23456789"
-        return prefix + (1..12).map { alphabet.random() }.joinToString("")
+    /**
+     * A random password: 20 characters from an alphabet without the pairs that look alike
+     * (l/1, 0/O), because this value is read off the screen and typed into another app.
+     */
+    private fun generate(): String {
+        val alphabet = "abcdefghijkmnopqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ23456789"
+        val random = java.security.SecureRandom()
+        return (1..20).map { alphabet[random.nextInt(alphabet.length)] }.joinToString("")
     }
 }
