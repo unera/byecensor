@@ -132,6 +132,8 @@ class MainActivity : AppCompatActivity() {
         // прокси живёт всегда: приложение открыто — значит локальный порт уже слушает, и
         // приложениям не нужно ждать, пока человек нажмёт что-то
         if (!ProxyService.State.running) ProxyService.start(this)
+        // на входе в экран — свежие цифры, а не те, что были на прошлом тике
+        if (ProxyService.State.running) ProxyService.pollTraffic(this)
         if (store.configDirty) {
             store.configDirty = false
             runCatching { ProxyService.reload(this) }
@@ -843,6 +845,8 @@ class MainActivity : AppCompatActivity() {
 
     private fun showResult(answer: Probe.Result, square: ImageView?) {
         pendingTicker.removeCallbacks(tick)
+        // тест только что прогнал трафик: счётчики надо забрать у ядра, не дожидаясь тика
+        ProxyService.pollTraffic(this)
         setProbesBusy(false)
         result.text = if (answer.ok) answer.text else withPrefix(answer.text)
         result.setTextColor(

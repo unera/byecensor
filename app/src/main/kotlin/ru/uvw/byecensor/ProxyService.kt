@@ -232,16 +232,9 @@ class ProxyService : Service() {
 
     /** Read the counters, add them to both sums, and let the kernel start them from zero. */
     private fun collectTraffic(store: Store, binary: File, assets: File) {
-        val read = Traffic.query(binary, assets) ?: return
-        if (read.up == 0L && read.down == 0L) return
-        val up = store.trafficUp + read.up
-        val down = store.trafficDown + read.down
-        store.trafficUp = up
-        store.trafficDown = down
-        State.sessionUp += read.up
-        State.sessionDown += read.down
-        State.totalUp = up
-        State.totalDown = down
+        synchronized(trafficLock) {
+            fold(store, Traffic.query(binary, assets) ?: return)
+        }
     }
 
     override fun onDestroy() {
@@ -462,6 +455,46 @@ class ProxyService : Service() {
     }
 
     companion object {
+        /**
+         * One reading is handed out once, so two readers folding at the same moment would lose
+         * one of the two numbers: the lock covers both the query and the add-up.
+         */
+        private val trafficLock = Any()
+
+        /** Move one reading from the kernel into the sums the screens read. */
+        private fun fold(store: Store, read: Traffic.Read) {
+            if (read.up == 0L && read.down == 0L) return
+            val up = store.trafficUp + read.up
+            val down = store.trafficDown + read.down
+            store.trafficUp = up
+            store.trafficDown = down
+            State.sessionUp += read.up
+            State.sessionDown += read.down
+            State.totalUp = up
+            State.totalDown = down
+        }
+
+        /**
+         * Read the counters now instead of at the next tick.
+         *
+         * The screen calls this when something has just moved traffic — the end of a test, the way
+         * back into the app — because ten seconds of a stale number read like a broken counter.
+         */
+        fun pollTraffic(context: Context) {
+            val app = context.applicationContext
+            Thread {
+                synchronized(trafficLock) {
+                    fold(
+                        Store(app),
+                        Traffic.query(
+                            File(app.applicationInfo.nativeLibraryDir, "libxray.so"),
+                            File(app.filesDir, "assets"),
+                        ) ?: return@synchronized,
+                    )
+                }
+            }.apply { isDaemon = true }.start()
+        }
+
         private const val CHANNEL = "proxy-active"
         /** How often the counters are read out of the kernel. */
         private const val TRAFFIC_TICK_MS = 10_000L
