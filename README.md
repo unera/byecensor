@@ -25,6 +25,8 @@ setting of their own at all, and saying otherwise would waste an hour of somebod
 - two domain lists decide the route: "direct" (always bypass the server) and "always through the
   server" (wins over the first one, so `ru` direct plus `2ip.ru` proxied works as written);
 - a quick settings tile switches between "through the server" and "direct";
+- counts the traffic it carries: this session on the left of the button, everything since the last
+  reset on the right (long tap on the right number resets it);
 - the proxy is up whenever the app is; the button chooses where traffic goes, not whether the
   proxy exists.
 
@@ -38,6 +40,27 @@ the binary is not committed.
 The kernel is started by a foreground service and reads a config generated on the fly. Readiness is
 "the port answers", not "a line appeared in the log" — with `loglevel: warning` the kernel never
 announces itself.
+
+## Traffic counter
+
+The numbers are the kernel's own, not a guess made from socket reads. The config carries
+`"stats": {}`, the API door on `127.0.0.1:12099` and a routing rule that sends that door to the
+kernel's own `api` handler; the flags that actually switch counting on live in `policy.system`
+(`statsInboundUplink`, `statsInboundDownlink`) — the per-level ones in `policy.levels` cover users
+and leave the door counters silent, which answers every query with `{}` and looks like a broken
+feature.
+
+Reading is the kernel's own command line, `libxray.so api statsquery -pattern "inbound>>>" -reset`,
+rather than a gRPC client: the alternative is a protobuf schema and a library in the APK for two
+integers. `-reset` is the point — the kernel hands out what it counted and starts again from zero,
+so the counters move into the app's own sums in one step.
+
+The sums then live in two places on purpose: the session counter is this connection (it starts
+where the clock does), and the lifetime counter is in `SharedPreferences`. Restarting the kernel
+on a network change, installing an update or rebooting the phone therefore does not lose the count;
+the last reading is taken before the kernel is stopped, and the API adds nothing to the total
+between readings. Everything is summed across all doors (SOCKS, HTTP, both WhatsApp ports) except
+the API door itself, which counts questions rather than traffic.
 
 ## Requirements
 
