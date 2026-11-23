@@ -27,6 +27,7 @@ import androidx.appcompat.app.AppCompatActivity
 import ru.uvw.byecensor.logic.Config
 import ru.uvw.byecensor.logic.Probe
 import ru.uvw.byecensor.logic.Server
+import ru.uvw.byecensor.logic.Traffic
 import ru.uvw.byecensor.logic.Updater
 import ru.uvw.byecensor.store.Store
 
@@ -49,6 +50,9 @@ class MainActivity : AppCompatActivity() {
     private lateinit var proxySquare: ImageView
     private lateinit var speedSquare: ImageView
     private lateinit var chevron: TextView
+    /** Слева от кнопки — эта сессия, справа — всего с последнего сброса. */
+    private var sessionTraffic: TrafficColumn? = null
+    private var totalTraffic: TrafficColumn? = null
     private var expanded = true
     private val ticker = Handler(Looper.getMainLooper())
     /** Last measured latency per configuration id, in milliseconds. */
@@ -351,11 +355,31 @@ class MainActivity : AppCompatActivity() {
             background = rounded(Color.parseColor("#161616"), 26f)
             setPadding(dp(26), dp(26), dp(26), dp(26))
             setOnClickListener { buttonPressed() }
-            layoutParams = LinearLayout.LayoutParams(dp(110), dp(110)).apply {
-                gravity = Gravity.CENTER_HORIZONTAL
-                topMargin = dp(18)
-            }
         }
+
+        // трафик — по бокам от кнопки, где его видно не отрывая глаз от состояния: слева то,
+        // что ушло за эту сессию, справа — всего с последнего сброса (долгий тап сбрасывает).
+        // Родные счётчики ядра живут в его памяти и умирают вместе с ним, поэтому правые числа
+        // хранятся в Store и переживают рестарт ядра, обновление и перезагрузку телефона.
+        val trafficRow = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            layoutParams = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT,
+            ).apply { topMargin = dp(18) }
+        }
+        val sessionColumn = trafficColumn("сессия")
+        sessionTraffic = sessionColumn
+        trafficRow.addView(sessionColumn.view, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
+        trafficRow.addView(button, LinearLayout.LayoutParams(dp(110), dp(110)))
+        val totalColumn = trafficColumn("всего")
+        totalTraffic = totalColumn
+        totalColumn.view.setOnLongClickListener {
+            askTrafficReset()
+            true
+        }
+        trafficRow.addView(totalColumn.view, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
         // версия — над кнопкой: в переписке чаще всего спрашивают именно её, а искать её
         // в настройках ради одной строки — лишний путь
         root.addView(TextView(this).apply {
@@ -365,7 +389,7 @@ class MainActivity : AppCompatActivity() {
             setTextColor(Color.parseColor("#6b7280"))
             setPadding(0, dp(12), 0, 0)
         })
-        root.addView(button)
+        root.addView(trafficRow)
 
         pill = TextView(this).apply {
             textSize = 15f
@@ -446,6 +470,72 @@ class MainActivity : AppCompatActivity() {
         setColor(color)
     }
 
+    /**
+     * Two numbers with a caption: down on top, up under it.
+     *
+     * Down first because that is the direction people watch — a video that is not playing is a
+     * download problem far more often than an upload one.
+     */
+    private inner class TrafficColumn(val view: LinearLayout, val up: TextView, val down: TextView) {
+        fun set(downBytes: Long, upBytes: Long) {
+            // ↑ и ↓ — это U+2191 и U+2193 с селектором текстового начертания (U+FE0E):
+            // без него некоторые прошивки подставляют вместо стрелки цветной эмодзи
+            down.text = "\u2193\uFE0E " + Traffic.format(downBytes)
+            up.text = "\u2191\uFE0E " + Traffic.format(upBytes)
+        }
+    }
+
+    private fun trafficColumn(title: String): TrafficColumn {
+        val column = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            gravity = Gravity.CENTER
+        }
+        val down = TextView(this).apply {
+            textSize = 14f
+            text = "\u2193\uFE0E 0 Б"
+            gravity = Gravity.CENTER
+            setTextColor(Color.parseColor("#c9c9c9"))
+            setTypeface(android.graphics.Typeface.MONOSPACE)
+        }
+        val up = TextView(this).apply {
+            textSize = 14f
+            text = "\u2191\uFE0E 0 Б"
+            gravity = Gravity.CENTER
+            setTextColor(Color.parseColor("#8b8b8b"))
+            setTypeface(android.graphics.Typeface.MONOSPACE)
+        }
+        val caption = TextView(this).apply {
+            text = title
+            textSize = 11f
+            gravity = Gravity.CENTER
+            setTextColor(Color.parseColor("#6b7280"))
+            setPadding(0, dp(4), 0, 0)
+        }
+        column.addView(down)
+        column.addView(up)
+        column.addView(caption)
+        // a column is a tappable thing only on the right, where the long tap resets the total
+        column.isClickable = true
+        return TrafficColumn(column, up, down)
+    }
+
+    /** Reset the lifetime counter — the session one keeps counting, it is this run's own. */
+    private fun askTrafficReset() {
+        AlertDialog.Builder(this)
+            .setTitle("Сбросить счётчик трафика?")
+            .setMessage("Сумма «всего» начнётся с нуля. Трафик этой сессии останется как есть.")
+            .setPositiveButton("Сбросить") { _, _ ->
+                store.trafficUp = 0
+                store.trafficDown = 0
+                ProxyService.State.totalUp = 0
+                ProxyService.State.totalDown = 0
+                totalTraffic?.set(0, 0)
+                result.text = "счётчик трафика сброшен"
+            }
+            .setNegativeButton("Отмена", null)
+            .show()
+    }
+
     private fun refresh() {
         pendingTicker.removeCallbacks(tick)
         val configured = store.servers.isNotEmpty()
@@ -485,6 +575,8 @@ class MainActivity : AppCompatActivity() {
             },
         )
         probes.visibility = if (configured) View.VISIBLE else View.GONE
+        sessionTraffic?.set(ProxyService.State.sessionDown, ProxyService.State.sessionUp)
+        totalTraffic?.set(ProxyService.State.totalDown, ProxyService.State.totalUp)
         refreshConfigs()
     }
 

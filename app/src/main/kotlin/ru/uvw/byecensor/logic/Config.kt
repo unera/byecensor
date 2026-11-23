@@ -33,6 +33,7 @@ object Config {
      * @param password - the SOCKS password, same reason.
      * @param directDomains - domains that must not go through the server (`ru` covers a country).
      * @param viaServer - false means everything goes direct, which is a proxy that is up and unused.
+     * @param apiPort - where the stats API listens on loopback; 0 turns the counters off.
      * @returns the JSON the kernel reads.
      */
     fun build(
@@ -49,6 +50,7 @@ object Config {
         waCertFile: String? = null,
         waKeyFile: String? = null,
         mux: Boolean = true,
+        apiPort: Int = 0,
     ): JSONObject {
         require(port in 1024..65535) { "порт должен быть от 1024 до 65535" }
         require(user.isNotBlank()) { "нужен логин SOCKS: без него к прокси подключится кто угодно" }
@@ -79,6 +81,17 @@ object Config {
                 .put("settings", JSONObject()
                     .put("auth", "password")
                     .put("accounts", JSONArray().put(JSONObject().put("user", user).put("pass", password)))))
+        }
+
+        // the stats API: a door the app itself talks to, on loopback and nothing else. It is the
+        // only way to ask the kernel how much it carried, and the counters live in its memory.
+        if (apiPort > 0) {
+            inbounds.put(JSONObject()
+                .put("tag", "api")
+                .put("listen", LISTEN)
+                .put("port", apiPort)
+                .put("protocol", "dokodemo-door")
+                .put("settings", JSONObject().put("address", LISTEN)))
         }
 
         // WhatsApp's own proxy ports. The client expects the same thing Meta's proxy does:
@@ -127,6 +140,13 @@ object Config {
         outbounds.put(JSONObject().put("tag", "block").put("protocol", "blackhole"))
 
         val rules = JSONArray()
+        // the API door answers from the kernel itself; without this rule the kernel has nowhere
+        // to send it and the query dies on "failed to dial"
+        if (apiPort > 0) {
+            rules.put(JSONObject().put("type", "field")
+                .put("inboundTag", JSONArray().put("api"))
+                .put("outboundTag", "api"))
+        }
         if (!viaServer) {
             // the proxy is up but carries nothing: every request leaves the phone as itself
             rules.put(JSONObject().put("type", "field")
@@ -159,12 +179,28 @@ object Config {
             }
         }
 
-        return JSONObject()
+        val root = JSONObject()
             .put("log", JSONObject().put("loglevel", "warning"))
             .put("inbounds", inbounds)
             .put("outbounds", outbounds)
             .put("routing", JSONObject().put("domainStrategy", "IPIfNonMatch").put("rules", rules))
-            .put("policy", JSONObject().put("levels", JSONObject()
-                .put("0", JSONObject().put("handshake", 4).put("connIdle", 300))))
+
+        if (apiPort > 0) {
+            // the counters are off until they are asked for, and they are asked for in "system":
+            // the per-level flags cover users, not doors, and with them alone the numbers never
+            // appear (checked against the kernel: statsquery answered an empty object)
+            root.put("stats", JSONObject())
+                .put("api", JSONObject().put("tag", "api").put("services", JSONArray().put("StatsService")))
+                .put("policy", JSONObject()
+                    .put("system", JSONObject()
+                        .put("statsInboundUplink", true)
+                        .put("statsInboundDownlink", true))
+                    .put("levels", JSONObject()
+                        .put("0", JSONObject().put("handshake", 4).put("connIdle", 300))))
+            return root
+        }
+
+        return root.put("policy", JSONObject().put("levels", JSONObject()
+            .put("0", JSONObject().put("handshake", 4).put("connIdle", 300))))
     }
 }

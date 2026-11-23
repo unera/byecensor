@@ -13,6 +13,7 @@ import android.os.PowerManager
 import android.os.IBinder
 import ru.uvw.byecensor.logic.Config
 import ru.uvw.byecensor.logic.Probe
+import ru.uvw.byecensor.logic.Traffic
 import ru.uvw.byecensor.store.Store
 import java.io.File
 import java.util.concurrent.CopyOnWriteArrayList
@@ -44,6 +45,8 @@ class ProxyService : Service() {
     private var replacing = false
     /** The user-facing ports, held open across kernel restarts. */
     private val frontPorts = mutableListOf<FrontPort>()
+    /** Reads the kernel's traffic counters while it runs. */
+    private var trafficThread: Thread? = null
 
     override fun onBind(intent: Intent?): IBinder? = null
 
@@ -78,11 +81,16 @@ class ProxyService : Service() {
     /** Front ports, wake lock, watchdogs and the kernel itself — a start from nothing. */
     private fun startEverything(): Boolean {
         startFrontPorts()
+        // a session starts here, not with the kernel: a kernel restart inside a running service
+        // is the same session, and the numbers on the screen should not jump back to zero
+        State.sessionUp = 0
+        State.sessionDown = 0
         val started = runCatching { launchKernel() }
         started.onSuccess {
             holdWakeLock()
             watchNetwork()
             watchHealth()
+            watchTraffic()
         }
         started.onFailure { fail(it.message ?: "ядро не запустилось") }
         return started.isSuccess
@@ -196,8 +204,48 @@ class ProxyService : Service() {
             store.directDomains, store.proxyDomains, viaServer,
             if (store.httpPort > 0) FrontPort.kernelPort(store.httpPort) else 0,
             store.waChatPort, store.waMediaPort, certFile, keyFile, store.muxEnabled,
+            Traffic.API_PORT,
         )
+        State.totalUp = store.trafficUp
+        State.totalDown = store.trafficDown
         startKernel(config.toString())
+    }
+
+    /**
+     * Follow the kernel's counters for as long as it lives.
+     *
+     * The reading resets them, so the numbers move out of the kernel and into this app's sums in
+     * one step: nothing is counted twice, and nothing is left behind in a process that is about
+     * to be restarted. Ten seconds is the cost of one short-lived process per tick — far less
+     * than a connection, and invisible next to the numbers it moves.
+     */
+    private fun watchTraffic() {
+        if (trafficThread?.isAlive == true) return
+        trafficThread = Thread {
+            val store = Store(this)
+            val binary = File(applicationInfo.nativeLibraryDir, "libxray.so")
+            val assets = File(filesDir, "assets")
+            while (process != null) {
+                Thread.sleep(TRAFFIC_TICK_MS)
+                if (process == null) break
+                collectTraffic(store, binary, assets)
+            }
+        }.apply { isDaemon = true }
+        trafficThread?.start()
+    }
+
+    /** Read the counters, add them to both sums, and let the kernel start them from zero. */
+    private fun collectTraffic(store: Store, binary: File, assets: File) {
+        val read = Traffic.query(binary, assets) ?: return
+        if (read.up == 0L && read.down == 0L) return
+        val up = store.trafficUp + read.up
+        val down = store.trafficDown + read.down
+        store.trafficUp = up
+        store.trafficDown = down
+        State.sessionUp += read.up
+        State.sessionDown += read.down
+        State.totalUp = up
+        State.totalDown = down
     }
 
     override fun onDestroy() {
@@ -308,6 +356,17 @@ class ProxyService : Service() {
 
     private fun stopKernel(replacing: Boolean) {
         this.replacing = replacing
+        // the kernel dies with its counters: take the last of them before it goes
+        process?.let {
+            runCatching {
+                collectTraffic(
+                    Store(this),
+                    File(applicationInfo.nativeLibraryDir, "libxray.so"),
+                    File(filesDir, "assets"),
+                )
+            }
+        }
+        trafficThread = null
         process?.let { proc ->
             runCatching { proc.destroy() }
             runCatching { proc.waitFor() }
@@ -388,6 +447,12 @@ class ProxyService : Service() {
         @Volatile var ready = false
         @Volatile var startedAt = 0L
         @Volatile var error: String? = null
+        /** Traffic carried since the proxy came up: the kernel's counters, summed as they pass. */
+        @Volatile var sessionUp = 0L
+        @Volatile var sessionDown = 0L
+        /** Traffic carried since the person last reset the counter: survives restarts. */
+        @Volatile var totalUp = 0L
+        @Volatile var totalDown = 0L
         val lines = CopyOnWriteArrayList<String>()
 
         fun log(line: String) {
@@ -398,6 +463,8 @@ class ProxyService : Service() {
 
     companion object {
         private const val CHANNEL = "proxy-active"
+        /** How often the counters are read out of the kernel. */
+        private const val TRAFFIC_TICK_MS = 10_000L
         private const val NOTIFICATION_ID = 4101
         const val ACTION_STOP = "ru.uvw.byecensor.STOP"
         const val ACTION_RELOAD = "ru.uvw.byecensor.RELOAD"

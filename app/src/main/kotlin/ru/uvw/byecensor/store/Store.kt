@@ -311,6 +311,21 @@ class Store(context: Context) {
         return if (file.exists()) file else null
     }
 
+    /**
+     * Everything the kernel has carried, in bytes, since the person last reset the counter.
+     *
+     * The kernel's own counters die with it, so this is where they are folded: the service reads
+     * them with `-reset` and adds what it read here. Two numbers, because one sum over both
+     * directions is a sum nobody can check.
+     */
+    var trafficUp: Long
+        get() = prefs.getLong("traffic-up", 0)
+        set(value) = prefs.edit().putLong("traffic-up", value).apply()
+
+    var trafficDown: Long
+        get() = prefs.getLong("traffic-down", 0)
+        set(value) = prefs.edit().putLong("traffic-down", value).apply()
+
     /** The subscription URL, when the person uses one. */
     var subscription: String
         get() = prefs.getString("subscription", "") ?: ""
