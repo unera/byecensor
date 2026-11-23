@@ -20,6 +20,7 @@ import androidx.appcompat.app.AppCompatActivity
 import ru.uvw.byecensor.logic.Config
 import ru.uvw.byecensor.logic.Probe
 import ru.uvw.byecensor.logic.Server
+import ru.uvw.byecensor.logic.Updater
 import ru.uvw.byecensor.store.Store
 
 /**
@@ -32,6 +33,15 @@ class SectionActivity : AppCompatActivity() {
     private lateinit var store: Store
     private lateinit var root: LinearLayout
     private lateinit var section: String
+    /** Состояние разрешения на установку: с ним экран понимает, что надо перерисоваться. */
+    private var canInstall = false
+
+    override fun onResume() {
+        super.onResume()
+        // человек уходил на системный экран и, возможно, что-то там переключил
+        if (section != "update") return
+        if (Updater.canInstall(this) != canInstall) recreate()
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -59,6 +69,7 @@ class SectionActivity : AppCompatActivity() {
         }
         when (section) {
             "params" -> params()
+            "update" -> update()
             "routing" -> routing()
             "subscription" -> subscription()
             "servers" -> servers()
@@ -69,6 +80,7 @@ class SectionActivity : AppCompatActivity() {
 
     private fun title(): String = when (section) {
         "params" -> "Параметры подключения"
+        "update" -> "Автоматическое обновление программы"
         "routing" -> "Маршрутизация"
         "subscription" -> "Подписка"
         "servers" -> "Серверы"
@@ -116,6 +128,137 @@ class SectionActivity : AppCompatActivity() {
                 })
             }
         })
+    }
+
+    /**
+     * «Автоматическое обновление программы»: расписание, ручная проверка, установка, разрешения.
+     *
+     * One screen instead of two rows in the menu, because these are steps of one story: how often
+     * to look, what came back, what to do with it, and what Android must allow for the last step.
+     */
+    private fun update() {
+        header(title())
+
+        val intervalCard = Ui.card(this)
+        intervalCard.addView(Ui.title(this, "Проверять обновления"))
+        val interval = Updater.Interval.of(store.updateInterval)
+        intervalCard.addView(Ui.line(this, interval.label).apply {
+            setTextColor(Color.parseColor("#7bd88f"))
+        })
+        val detail = Ui.line(this, updateDetail(interval))
+        intervalCard.addView(detail)
+        intervalCard.addView(Ui.line(this,
+            "Новая версия скачивается сама, а при открытии главного экрана приложение " +
+                "спросит, устанавливать ли её"))
+        intervalCard.isClickable = true
+        intervalCard.setOnClickListener {
+            val options = Updater.Interval.entries.map { it.label }.toTypedArray()
+            AlertDialog.Builder(this)
+                .setTitle("Проверять обновления")
+                .setSingleChoiceItems(options, Updater.Interval.entries.indexOf(interval)) { dialog, which ->
+                    store.updateInterval = Updater.Interval.entries[which].key
+                    dialog.dismiss()
+                    recreate()
+                }
+                .setNegativeButton(android.R.string.cancel, null)
+                .show()
+        }
+        root.addView(intervalCard)
+
+        // Проверка руками: то же, что делает запуск, но по нажатию и с ответом на экране.
+        // Скачанное сразу предлагается поставить — ждать следующего входа в главный экран,
+        // когда человек уже здесь и явно попросил, было бы странно.
+        lateinit var checkButton: TextView
+        val state = Ui.line(this, store.pendingUpdateVersion?.let { "скачано $it, ждёт установки" } ?: "")
+        checkButton = Ui.button(this, "Проверить обновления") { checkNow(checkButton, state) }
+        root.addView(checkButton)
+        root.addView(state.apply { setPadding(dp(28), 0, dp(28), dp(6)) })
+
+        val pending = store.pendingUpdate(this)
+        val pendingVersion = store.pendingUpdateVersion
+        if (pending != null && pendingVersion != null && Updater.newer(pendingVersion, Updater.currentVersion(this))) {
+            root.addView(Ui.button(this, "Установить обновление $pendingVersion") {
+                UpdateUi.install(this, pending) {
+                    store.pendingUpdateVersion = null
+                    store.pendingUpdateFile = null
+                }
+            })
+        }
+
+        // Разрешение — последний шаг этой же истории: без него установка упирается в системный
+        // экран, и хорошо бы, чтобы человек узнал об этом здесь, а не в момент обновления.
+        canInstall = Updater.canInstall(this)
+        val integration = Ui.card(this)
+        integration.addView(Ui.title(this, "Интеграция с Android"))
+        integration.addView(Ui.state(
+            this,
+            if (canInstall) "установка программ: разрешено" else "установка программ: запрещено",
+            canInstall,
+        ))
+        integration.addView(Ui.line(this,
+            "Без этого разрешения приложение не может поставить скачанное обновление. " +
+                "Разрешение даётся системе, а не приложению: Android откроет свой экран"))
+        // Тап по всему пункту, а не отдельная кнопка: пункт и есть одно действие, и вторая
+        // кнопка внутри него только спрашивала, которую из двух нажимать.
+        integration.addView(Ui.line(this, "нажмите, чтобы открыть настройки Android", mono = false).apply {
+            setTextColor(Color.parseColor("#4f8fe0"))
+        })
+        integration.isClickable = true
+        integration.setOnClickListener {
+            runCatching { Updater.openInstallPermission(this) }
+                .onFailure { toast("системный экран не открылся: ${it.message}") }
+        }
+        root.addView(integration)
+    }
+
+    /** Один запрос к GitHub по нажатию: скачать и сразу предложить установку. */
+    private fun checkNow(button: TextView, state: TextView) {
+        button.isEnabled = false
+        button.alpha = 0.6f
+        button.text = "проверяю…"
+        state.text = ""
+        Thread {
+            val outcome = Updater.checkAndDownload(this)
+            runOnUiThread {
+                button.isEnabled = true
+                button.alpha = 1f
+                button.text = "Проверить обновления"
+                val file = outcome.file
+                val version = outcome.version
+                if (file == null || version == null) {
+                    state.text = outcome.text
+                    return@runOnUiThread
+                }
+                store.pendingUpdateVersion = version
+                store.pendingUpdateFile = file.name
+                state.text = "скачано $version, ждёт установки"
+                // Отказ здесь не отменяет обновление: файл остаётся, и главный экран спросит
+                // сам — ровно так, как если бы версию нашла фоновая проверка.
+                UpdateUi.offerInstall(
+                    this, version, file,
+                    onDecline = { toast("обновление $version ждёт: спрошу на главном экране") },
+                    onStarted = {
+                        store.pendingUpdateVersion = null
+                        store.pendingUpdateFile = null
+                    },
+                )
+            }
+        }.apply { isDaemon = true }.start()
+    }
+
+    /** Когда проверяли в прошлый раз — и не ждёт ли установки скачанное. */
+    private fun updateDetail(interval: Updater.Interval): String {
+        if (interval == Updater.Interval.NEVER) return "проверка выключена"
+        val last = store.lastUpdateCheck
+        if (last == 0L) return "ещё не проверяли"
+        val minutes = (System.currentTimeMillis() - last) / 60_000
+        val ago = when {
+            minutes < 1 -> "только что"
+            minutes < 60 -> "$minutes мин назад"
+            minutes < 60 * 24 -> "${minutes / 60} ч назад"
+            else -> "${minutes / (60 * 24)} дн назад"
+        }
+        return "последняя проверка: $ago"
     }
 
     /** Everything an app needs to reach the proxy: the port and the credentials. */

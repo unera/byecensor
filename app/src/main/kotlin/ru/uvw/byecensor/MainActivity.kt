@@ -199,49 +199,19 @@ class MainActivity : AppCompatActivity() {
         }
         if (isFinishing || isDestroyed) return
         updateAsked = true
-        val version = store.pendingUpdateVersion ?: "новее этой"
-        AlertDialog.Builder(this)
-            .setTitle("Обновление $version уже скачано")
-            .setMessage(
-                "Установить сейчас? Если отложить, вопрос вернётся при следующем открытии " +
-                    "главного экрана.",
-            )
-            .setPositiveButton("Установить") { _, _ -> installUpdate(file) }
-            .setNegativeButton("Позже", null)
-            .show()
-    }
-
-    /**
-     * Hand the file to the system installer — or explain what Android wants first.
-     *
-     * Since Android 8 installing an APK is a permission of its own, granted on a system screen
-     * that this app cannot open by itself. Saying that in words beats a button that silently
-     * does nothing.
-     */
-    private fun installUpdate(file: java.io.File) {
-        if (!Updater.canInstall(this)) {
-            AlertDialog.Builder(this)
-                .setTitle("Нужно разрешение на установку")
-                .setMessage(
-                    "Android не разрешает приложениям ставить APK без согласия. Откроется " +
-                        "системный экран — включите там «Разрешить установку из этого источника», " +
-                        "и вернитесь сюда: обновление уже скачано.",
-                )
-                .setPositiveButton("Открыть настройки") { _, _ ->
-                    runCatching { Updater.openInstallPermission(this) }
-                        .onFailure { pending("системный экран не открылся: ${it.message}") }
-                }
-                .setNegativeButton(android.R.string.cancel, null)
-                .show()
+        val version = store.pendingUpdateVersion ?: return
+        if (!Updater.newer(version, Updater.currentVersion(this))) {
+            // обновление уже установлено (или файл от другой версии): вопрос больше не про что
+            store.pendingUpdateVersion = null
+            store.pendingUpdateFile = null
             return
         }
-        runCatching { Updater.install(this, file) }
-            .onSuccess {
-                // установщик заменит приложение целиком: после этого файл уже не нужен
-                store.pendingUpdateVersion = null
-                store.pendingUpdateFile = null
-            }
-            .onFailure { pending("установщик не открылся: ${it.message ?: it.javaClass.simpleName}") }
+        // «Позже» не отменяет обновление: файл остаётся, и следующий вход спросит снова
+        UpdateUi.offerInstall(
+            this, version, file,
+            onDecline = { result.text = "обновление $version ждёт: спрошу при следующем входе" },
+            onStarted = { store.pendingUpdateVersion = null; store.pendingUpdateFile = null },
+        )
     }
 
     /**
