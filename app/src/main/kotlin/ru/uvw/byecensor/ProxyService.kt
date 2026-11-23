@@ -59,12 +59,24 @@ class ProxyService : Service() {
             }
             ACTION_RELOAD -> {
                 startForeground(NOTIFICATION_ID, notification("Перечитываю настройки…"))
+                // Reload is also how a stopped service gets asked to come up (the main screen
+                // toggles the mode that way). When there is no kernel yet there is nothing to
+                // replace — and a "replace" alone would never bind the front ports, so the
+                // kernel would listen on a port nothing is pointed at.
+                if (process == null) {
+                    return if (startEverything()) START_STICKY else START_NOT_STICKY
+                }
                 replaceKernel()
                 return START_STICKY
             }
         }
         if (process != null) return START_STICKY
         startForeground(NOTIFICATION_ID, notification("Запускаю ядро…"))
+        return if (startEverything()) START_STICKY else START_NOT_STICKY
+    }
+
+    /** Front ports, wake lock, watchdogs and the kernel itself — a start from nothing. */
+    private fun startEverything(): Boolean {
         startFrontPorts()
         val started = runCatching { launchKernel() }
         started.onSuccess {
@@ -73,12 +85,15 @@ class ProxyService : Service() {
             watchHealth()
         }
         started.onFailure { fail(it.message ?: "ядро не запустилось") }
-        return if (started.isSuccess) START_STICKY else START_NOT_STICKY
+        return started.isSuccess
     }
 
     /** Replace a running kernel with one built from the current settings. */
     private fun replaceKernel() {
         stopKernel(replacing = true)
+        // a service that was restarted by ACTION_RELOAD has no front ports yet, and without them
+        // the new kernel is unreachable even though it is running
+        startFrontPorts()
         val started = runCatching { launchKernel() }
         started.onSuccess { holdWakeLock() }
         started.onFailure { fail(it.message ?: "ядро не запустилось") }
@@ -394,6 +409,18 @@ class ProxyService : Service() {
 
         fun stop(context: Context) {
             context.startService(Intent(context, ProxyService::class.java).setAction(ACTION_STOP))
+        }
+
+        /**
+         * Burn it down and start again.
+         *
+         * `stopService` is the only thing that works when the service believes it is running and
+         * the phone disagrees: an ACTION_STOP would be delivered to an instance that has nothing
+         * left to stop. After a stop the next start is a fresh instance with fresh ports.
+         */
+        fun restart(context: Context) {
+            runCatching { context.stopService(Intent(context, ProxyService::class.java)) }
+            start(context)
         }
 
         /** Ask a running kernel to rebuild itself from the current settings. */

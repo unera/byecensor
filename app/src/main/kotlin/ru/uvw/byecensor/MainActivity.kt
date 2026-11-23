@@ -56,6 +56,12 @@ class MainActivity : AppCompatActivity() {
     /** Один запрос к GitHub за одно открытие экрана, сколько бы раз он ни возобновлялся. */
     private var updateAsked = false
     private var updateCheckStarted = false
+    /** Последний честный ответ порта: спрашивали сокетом, а не флагом в памяти. */
+    private var kernelAlive = false
+    private var kernelMisses = 0
+    private var restartsTried = 0
+    private var lastAliveCheck = 0L
+    private var lastRestartAt = 0L
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -131,6 +137,7 @@ class MainActivity : AppCompatActivity() {
         ticker.post(object : Runnable {
             override fun run() {
                 refresh()
+                watchKernel()
                 ticker.postDelayed(this, 1000)
             }
         })
@@ -261,6 +268,65 @@ class MainActivity : AppCompatActivity() {
                 askInstallUpdate()
             }
         }.apply { isDaemon = true }.start()
+    }
+
+    /**
+     * Ask the port, not the flags, whether the proxy is alive — and raise it again when it is not.
+     *
+     * The failure this exists for: the phone reboots, the boot receiver starts the service, and
+     * the service ends up half-born (a kernel that never came up, or a service the system quietly
+     * stopped while the app's in-memory flag still says "running"). Everything driven by that flag
+     * then refuses to do anything: the big button reloads a service that has nothing to reload,
+     * and the proxy stays down until someone kills the service from the notification shade.
+     *
+     * A connect to the port has no such memory. When it stops answering twice in a row, the
+     * service is stopped with `stopService` and started again — not asked, told.
+     */
+    private fun watchKernel() {
+        val now = System.currentTimeMillis()
+        if (now - lastAliveCheck < 5_000) return
+        lastAliveCheck = now
+        val port = store.port
+        Thread {
+            val alive = Probe.portOpen(port)
+            runOnUiThread { onKernelVerdict(alive, port) }
+        }.apply { isDaemon = true }.start()
+    }
+
+    private fun onKernelVerdict(alive: Boolean, port: Int) {
+        if (isFinishing || isDestroyed) return
+        kernelAlive = alive
+        if (alive) {
+            kernelMisses = 0
+            restartsTried = 0
+            // порт ответил — значит ядро живо, даже если флаг остался снятым
+            if (!ProxyService.State.ready) ProxyService.State.ready = true
+            return
+        }
+        if (!ProxyService.State.ready && !ProxyService.State.running) {
+            // ничего не запущено: это не поломка, а пауза — экран сам поднимет службу
+            return
+        }
+        val now = System.currentTimeMillis()
+        // старт ядра занимает до пятнадцати секунд; всё, что моложе, — это ещё не отказ
+        if (now - ProxyService.State.startedAt < 20_000) return
+        kernelMisses += 1
+        if (kernelMisses < 2) return
+        if (now - lastRestartAt < 25_000) return
+        if (restartsTried >= 3) {
+            if (kernelMisses == 2) {
+                val why = ProxyService.State.error ?: "ядро молчит"
+                result.text = "прокси не поднимается сам: $why"
+                ProxyService.State.log("главный экран: три перезапуска подряд не помогли — $why")
+            }
+            return
+        }
+        kernelMisses = 0
+        restartsTried += 1
+        lastRestartAt = now
+        ProxyService.State.log("главный экран: порт $port не отвечает — перезапускаю службу")
+        result.text = "прокси не отвечает — перезапускаю…"
+        runCatching { ProxyService.restart(this) }
     }
 
     private fun build(root: LinearLayout) {
@@ -907,7 +973,15 @@ class MainActivity : AppCompatActivity() {
             return
         }
         store.viaServer = !store.viaServer
-        runCatching { ProxyService.reload(this) }
+        // A reload only replaces a kernel that exists. When the port does not answer there is
+        // nothing to replace, and asking politely produced a button that did nothing at all.
+        if (ProxyService.State.running && kernelAlive) {
+            runCatching { ProxyService.reload(this) }
+        } else {
+            restartsTried = 0
+            kernelMisses = 0
+            runCatching { ProxyService.restart(this) }
+        }
         pending(if (store.viaServer) "включаю сервер…" else "переключаю напрямую…")
         button.postDelayed({ refresh() }, 600)
     }

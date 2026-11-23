@@ -20,6 +20,15 @@ import ru.uvw.byecensor.store.Store
  */
 class SettingsActivity : AppCompatActivity() {
     private lateinit var store: Store
+    /** Состояние разрешения на установку: с ним экран понимает, что надо перерисоваться. */
+    private var canInstall = false
+
+    override fun onResume() {
+        super.onResume()
+        // человек уходил на системный экран и, возможно, что-то там переключил
+        val now = Updater.canInstall(this)
+        if (now != canInstall) recreate()
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -72,6 +81,7 @@ class SettingsActivity : AppCompatActivity() {
         }
         root.addView(autostart)
 
+        root.addView(integrationCard())
         root.addView(updateCard())
         root.addView(section("Параметры подключения", "${store.port} · ${store.user}", "params"))
         val direct = store.directDomains.size
@@ -84,6 +94,38 @@ class SettingsActivity : AppCompatActivity() {
         root.addView(section("Подписка", store.subscription.ifBlank { "не задана" }, "subscription"))
         root.addView(section("Серверы", if (store.servers.isEmpty()) "пусто" else "${store.servers.size} шт.", "servers"))
         root.addView(section("Журнал ядра", "строки, которые сказал ядро", "log"))
+    }
+
+    /**
+     * «Интеграция с Android»: the permissions this app needs from the system itself.
+     *
+     * Installing an APK is not a permission of the app but of the person: Android keeps it on a
+     * system screen, and an app can only lead there. Without this row the permission existed
+     * invisibly — the update dialog offered «Открыть настройки» and nothing said where that was.
+     */
+    private fun integrationCard(): android.view.View {
+        canInstall = Updater.canInstall(this)
+        val card = Ui.card(this)
+        card.addView(Ui.title(this, "Интеграция с Android"))
+        card.addView(Ui.state(
+            this,
+            if (canInstall) "установка программ: разрешено" else "установка программ: запрещено",
+            canInstall,
+        ))
+        card.addView(Ui.line(this,
+            "Без этого разрешения приложение не может поставить скачанное обновление. " +
+                "Разрешение даётся системе, а не приложению: Android откроет свой экран"))
+        val button = Ui.button(this, "Разрешить установку программ") {
+            runCatching { Updater.openInstallPermission(this) }
+                .onFailure {
+                    android.widget.Toast.makeText(
+                        this, "системный экран не открылся: ${it.message}",
+                        android.widget.Toast.LENGTH_SHORT,
+                    ).show()
+                }
+        }
+        card.addView(button)
+        return card
     }
 
     /**

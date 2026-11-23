@@ -100,6 +100,22 @@ object Probe {
      *
      * @returns the exit address, which is the one thing a person wants to see to believe it.
      */
+    /**
+     * Does anything answer on a local port?
+     *
+     * The cheapest honest question about the proxy: a socket that accepts a connection means the
+     * kernel is alive, whatever the app's own flags say. Flags live in memory and survive neither
+     * a killed process nor a service that was never started — a connect does not lie.
+     */
+    fun portOpen(port: Int, timeoutMs: Int = 400): Boolean = try {
+        Socket().use { it.connect(InetSocketAddress(Config.LISTEN, port), timeoutMs) }
+        true
+    } catch (error: IOException) {
+        false
+    } catch (error: SecurityException) {
+        false
+    }
+
     fun socks(
         port: Int,
         user: String,
