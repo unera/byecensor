@@ -12,6 +12,9 @@
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
     <!-- без этого система засыпает вместе с ядром, как только окно уходит в фон -->
     <uses-permission android:name="android.permission.WAKE_LOCK" />
+    <!-- обновление: скачанный APK отдаётся системному установщику, и без этого разрешения он
+         отказывается его открывать. Само разрешение человек выдаёт в настройках Android -->
+    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
 
     <application
         android:name=".ByecensorApp"
@@ -35,6 +38,17 @@
             android:name=".SettingsActivity"
             android:exported="false"
             android:label="@string/settings" />
+
+        <!-- установщик получает файл как content:// и не имеет права читать filesDir напрямую -->
+        <provider
+            android:name="androidx.core.content.FileProvider"
+            android:authorities="${applicationId}.updates"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data
+                android:name="android.support.FILE_PROVIDER_PATHS"
+                android:resource="@xml/update_paths" />
+        </provider>
 
         <service
             android:name=".ProxyTileService"

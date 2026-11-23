@@ -7,7 +7,9 @@ import android.view.Gravity
 import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.TextView
+import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
+import ru.uvw.byecensor.logic.Updater
 import ru.uvw.byecensor.store.Store
 
 /**
@@ -70,6 +72,7 @@ class SettingsActivity : AppCompatActivity() {
         }
         root.addView(autostart)
 
+        root.addView(updateCard())
         root.addView(section("Параметры подключения", "${store.port} · ${store.user}", "params"))
         val direct = store.directDomains.size
         val through = store.proxyDomains.size
@@ -81,6 +84,61 @@ class SettingsActivity : AppCompatActivity() {
         root.addView(section("Подписка", store.subscription.ifBlank { "не задана" }, "subscription"))
         root.addView(section("Серверы", if (store.servers.isEmpty()) "пусто" else "${store.servers.size} шт.", "servers"))
         root.addView(section("Журнал ядра", "строки, которые сказал ядро", "log"))
+    }
+
+    /**
+     * «Проверять обновления»: how often to ask GitHub, and what the last answer was.
+     *
+     * The schedule lives here rather than in a system setting, because the only thing that
+     * decides whether a check is worth making is the person who pays for the traffic.
+     */
+    private fun updateCard(): android.view.View {
+        val card = Ui.card(this)
+        val interval = Updater.Interval.of(store.updateInterval)
+        card.addView(Ui.title(this, "Проверять обновления"))
+        val value = TextView(this).apply {
+            text = interval.label
+            textSize = 15f
+            setTextColor(Color.parseColor("#7bd88f"))
+            setPadding(0, dp(4), 0, 0)
+        }
+        card.addView(value)
+        val detail = Ui.line(this, updateDetail(interval))
+        card.addView(detail)
+        card.addView(Ui.line(this,
+            "Новая версия скачивается сама, а при открытии главного экрана приложение " +
+                "спросит, устанавливать ли её"))
+        card.isClickable = true
+        card.setOnClickListener {
+            // никакого "никогда" по умолчанию и никакого скрытого согласия: выбор человека
+            val options = Updater.Interval.entries.map { it.label }.toTypedArray()
+            AlertDialog.Builder(this)
+                .setTitle("Проверять обновления")
+                .setSingleChoiceItems(options, Updater.Interval.entries.indexOf(interval)) { dialog, which ->
+                    store.updateInterval = Updater.Interval.entries[which].key
+                    dialog.dismiss()
+                    recreate()
+                }
+                .setNegativeButton(android.R.string.cancel, null)
+                .show()
+        }
+        return card
+    }
+
+    private fun updateDetail(interval: Updater.Interval): String {
+        if (interval == Updater.Interval.NEVER) return "проверка выключена"
+        val last = store.lastUpdateCheck
+        if (last == 0L) return "ещё не проверяли"
+        val minutes = (System.currentTimeMillis() - last) / 60_000
+        val ago = when {
+            minutes < 1 -> "только что"
+            minutes < 60 -> "$minutes мин назад"
+            minutes < 60 * 24 -> "${minutes / 60} ч назад"
+            else -> "${minutes / (60 * 24)} дн назад"
+        }
+        val version = store.pendingUpdateVersion
+        return if (version != null) "последняя проверка: $ago · скачано $version, ждёт установки"
+        else "последняя проверка: $ago"
     }
 
     private fun section(title: String, value: String, key: String) =

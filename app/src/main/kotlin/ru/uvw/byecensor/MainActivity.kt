@@ -27,6 +27,7 @@ import androidx.appcompat.app.AppCompatActivity
 import ru.uvw.byecensor.logic.Config
 import ru.uvw.byecensor.logic.Probe
 import ru.uvw.byecensor.logic.Server
+import ru.uvw.byecensor.logic.Updater
 import ru.uvw.byecensor.store.Store
 
 /**
@@ -52,6 +53,9 @@ class MainActivity : AppCompatActivity() {
     private val ticker = Handler(Looper.getMainLooper())
     /** Last measured latency per configuration id, in milliseconds. */
     private val latency = mutableMapOf<String, Int>()
+    /** Один запрос к GitHub за одно открытие экрана, сколько бы раз он ни возобновлялся. */
+    private var updateAsked = false
+    private var updateCheckStarted = false
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -110,6 +114,11 @@ class MainActivity : AppCompatActivity() {
     override fun onResume() {
         super.onResume()
         askForBatteryFreedom()
+        // Порядок: сначала вопрос про скачанное обновление, потом всё остальное. Если человек
+        // ушёл на другой экран и вернулся, вопрос вернётся вместе с ним — как и обещано.
+        updateAsked = false
+        askInstallUpdate()
+        lookForUpdate()
         // прокси живёт всегда: приложение открыто — значит локальный порт уже слушает, и
         // приложениям не нужно ждать, пока человек нажмёт что-то
         if (!ProxyService.State.running) ProxyService.start(this)
@@ -162,6 +171,96 @@ class MainActivity : AppCompatActivity() {
             }
             .setNegativeButton("Позже", null)
             .show()
+    }
+
+    /**
+     * Ask whether to install the update that is already downloaded.
+     *
+     * The question repeats on every return to this screen until it is answered with «Установить»
+     * or until the person turns checking off: an update that was downloaded and then forgotten
+     * is exactly how a phone stays on an old version for months.
+     */
+    private fun askInstallUpdate() {
+        if (updateAsked) return
+        val file = store.pendingUpdate(this) ?: run {
+            // файл пропал (почистили данные, удалили вручную) — не обещаем то, чего нет
+            if (store.pendingUpdateFile != null) {
+                store.pendingUpdateVersion = null
+                store.pendingUpdateFile = null
+            }
+            return
+        }
+        if (isFinishing || isDestroyed) return
+        updateAsked = true
+        val version = store.pendingUpdateVersion ?: "новее этой"
+        AlertDialog.Builder(this)
+            .setTitle("Обновление $version уже скачано")
+            .setMessage(
+                "Установить сейчас? Если отложить, вопрос вернётся при следующем открытии " +
+                    "главного экрана.",
+            )
+            .setPositiveButton("Установить") { _, _ -> installUpdate(file) }
+            .setNegativeButton("Позже", null)
+            .show()
+    }
+
+    /**
+     * Hand the file to the system installer — or explain what Android wants first.
+     *
+     * Since Android 8 installing an APK is a permission of its own, granted on a system screen
+     * that this app cannot open by itself. Saying that in words beats a button that silently
+     * does nothing.
+     */
+    private fun installUpdate(file: java.io.File) {
+        if (!Updater.canInstall(this)) {
+            AlertDialog.Builder(this)
+                .setTitle("Нужно разрешение на установку")
+                .setMessage(
+                    "Android не разрешает приложениям ставить APK без согласия. Откроется " +
+                        "системный экран — включите там «Разрешить установку из этого источника», " +
+                        "и вернитесь сюда: обновление уже скачано.",
+                )
+                .setPositiveButton("Открыть настройки") { _, _ ->
+                    runCatching { Updater.openInstallPermission(this) }
+                        .onFailure { pending("системный экран не открылся: ${it.message}") }
+                }
+                .setNegativeButton(android.R.string.cancel, null)
+                .show()
+            return
+        }
+        runCatching { Updater.install(this, file) }
+            .onSuccess {
+                // установщик заменит приложение целиком: после этого файл уже не нужен
+                store.pendingUpdateVersion = null
+                store.pendingUpdateFile = null
+            }
+            .onFailure { pending("установщик не открылся: ${it.message ?: it.javaClass.simpleName}") }
+    }
+
+    /**
+     * Look for a newer release — by the schedule from the settings, in the background.
+     *
+     * Nothing is said while it runs: a check that fails (no network, GitHub down, a phone behind
+     * a captive portal) is not news, and saying it on every launch would train the person to
+     * ignore this screen's messages. A downloaded update, on the other hand, does speak.
+     */
+    private fun lookForUpdate() {
+        if (updateCheckStarted) return
+        updateCheckStarted = true
+        if (!store.updateDue()) return
+        if (store.pendingUpdate(this) != null) return
+        store.lastUpdateCheck = System.currentTimeMillis()
+        Thread {
+            val outcome = Updater.checkAndDownload(this)
+            val version = outcome.version ?: return@Thread
+            val file = outcome.file ?: return@Thread
+            store.pendingUpdateVersion = version
+            store.pendingUpdateFile = file.name
+            runOnUiThread {
+                updateAsked = false
+                askInstallUpdate()
+            }
+        }.apply { isDaemon = true }.start()
     }
 
     private fun build(root: LinearLayout) {

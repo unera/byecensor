@@ -5,6 +5,7 @@ import org.json.JSONArray
 import org.json.JSONObject
 import ru.uvw.byecensor.logic.Config
 import ru.uvw.byecensor.logic.Server
+import ru.uvw.byecensor.logic.Updater
 
 /**
  * Everything the app remembers: the servers, which one is chosen, and the local settings.
@@ -271,6 +272,44 @@ class Store(context: Context) {
     var askedBatteryFreedom: Boolean
         get() = prefs.getBoolean("askedBatteryFreedom", false)
         set(value) = prefs.edit().putBoolean("askedBatteryFreedom", value).apply()
+
+    /**
+     * How often to look for a newer release on GitHub.
+     *
+     * Stored as the key of `Updater.Interval`: the value is read by the screens and compared
+     * against the moment of the last check, so a schedule survives a restart as a plain string.
+     */
+    var updateInterval: String
+        get() = prefs.getString("update-interval", null) ?: Updater.Interval.DEFAULT.key
+        set(value) = prefs.edit().putString("update-interval", value).apply()
+
+    /** When the app last asked GitHub, in milliseconds since epoch. */
+    var lastUpdateCheck: Long
+        get() = prefs.getLong("update-checked", 0)
+        set(value) = prefs.edit().putLong("update-checked", value).apply()
+
+    /** Downloaded and waiting for the person to install: version and file name, or null. */
+    var pendingUpdateVersion: String?
+        get() = prefs.getString("update-version", null)
+        set(value) = prefs.edit().putString("update-version", value).apply()
+
+    var pendingUpdateFile: String?
+        get() = prefs.getString("update-file", null)
+        set(value) = prefs.edit().putString("update-file", value).apply()
+
+    /** Is it time to ask GitHub again? Never, when the person turned checking off. */
+    fun updateDue(now: Long = System.currentTimeMillis()): Boolean {
+        val interval = Updater.Interval.of(updateInterval)
+        if (interval == Updater.Interval.NEVER) return false
+        return now - lastUpdateCheck >= interval.hours * 3_600_000
+    }
+
+    /** The downloaded update, when the file is still where it was left. */
+    fun pendingUpdate(context: Context): java.io.File? {
+        val name = pendingUpdateFile ?: return null
+        val file = java.io.File(java.io.File(context.filesDir, "updates"), name)
+        return if (file.exists()) file else null
+    }
 
     /** The subscription URL, when the person uses one. */
     var subscription: String
