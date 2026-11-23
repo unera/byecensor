@@ -81,10 +81,6 @@ class ProxyService : Service() {
     /** Front ports, wake lock, watchdogs and the kernel itself — a start from nothing. */
     private fun startEverything(): Boolean {
         startFrontPorts()
-        // a session starts here, not with the kernel: a kernel restart inside a running service
-        // is the same session, and the numbers on the screen should not jump back to zero
-        State.sessionUp = 0
-        State.sessionDown = 0
         val started = runCatching { launchKernel() }
         started.onSuccess {
             holdWakeLock()
@@ -294,6 +290,10 @@ class ProxyService : Service() {
         process = proc
         State.running = true
         State.startedAt = System.currentTimeMillis()
+        // a session is this connection, not this service: the clock next to it starts here too,
+        // and the totals on the right are what keeps what the previous connection carried
+        State.sessionUp = 0
+        State.sessionDown = 0
         reader = Thread {
             runCatching {
                 proc.inputStream.bufferedReader().forEachLine { line ->
